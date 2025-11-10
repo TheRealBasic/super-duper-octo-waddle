@@ -36,11 +36,15 @@ export const CreateServerSchema = z.object({
   iconUrl: z.string().url().optional(),
 });
 
+export const ChannelTypes = ['TEXT', 'VOICE'] as const;
+export type ChannelType = (typeof ChannelTypes)[number];
+
 export const CreateChannelSchema = z.object({
   serverId: z.string().uuid(),
   name: z.string().min(1).max(100),
   parentId: z.string().uuid().nullable().optional(),
   isPrivate: z.boolean().optional(),
+  type: z.enum(ChannelTypes).default('TEXT'),
 });
 
 export const MessageSchema = z.object({
@@ -64,6 +68,11 @@ export const WebsocketEvents = {
   MESSAGE_DELETED: 'message.deleted',
   REACTION_UPDATED: 'reaction.updated',
   UNREAD_UPDATE: 'unread.update',
+  RTC_PARTICIPANTS: 'rtc.participants',
+  RTC_PARTICIPANT_JOINED: 'rtc.participant-joined',
+  RTC_PARTICIPANT_LEFT: 'rtc.participant-left',
+  RTC_SIGNAL: 'rtc.signal',
+  RTC_MEDIA_UPDATED: 'rtc.media-updated',
 } as const;
 
 export type WebsocketEventName = (typeof WebsocketEvents)[keyof typeof WebsocketEvents];
@@ -115,6 +124,49 @@ export const ReactionSchema = z.object({
   emoji: z.string().min(1).max(64),
 });
 
+const rtcRoomTarget = z
+  .object({
+    channelId: z.string().uuid().optional(),
+    threadId: z.string().uuid().optional(),
+  })
+  .refine((data) => data.channelId || data.threadId, {
+    message: 'channelId or threadId is required',
+  });
+
+export const RTCJoinSchema = rtcRoomTarget.extend({
+  enableVideo: z.boolean().optional(),
+});
+
+export const RTCLeaveSchema = rtcRoomTarget;
+
+const rtcOffer = z.object({
+  type: z.literal('offer'),
+  sdp: z.string(),
+});
+
+const rtcAnswer = z.object({
+  type: z.literal('answer'),
+  sdp: z.string(),
+});
+
+const rtcIceCandidate = z.object({
+  type: z.literal('ice'),
+  candidate: z.object({
+    candidate: z.string(),
+    sdpMid: z.string().nullable().optional(),
+    sdpMLineIndex: z.number().nullable().optional(),
+  }),
+});
+
+export const RTCSignalSchema = rtcRoomTarget.extend({
+  targetUserId: z.string().uuid(),
+  payload: z.union([rtcOffer, rtcAnswer, rtcIceCandidate]),
+});
+
+export const RTCMediaUpdateSchema = rtcRoomTarget.extend({
+  videoEnabled: z.boolean(),
+});
+
 export type RegisterInput = z.infer<typeof RegisterSchema>;
 export type LoginInput = z.infer<typeof LoginSchema>;
 export type CreateServerInput = z.infer<typeof CreateServerSchema>;
@@ -126,6 +178,10 @@ export type CreateMessageInput = z.infer<typeof CreateMessageSchema>;
 export type EditMessageInput = z.infer<typeof EditMessageSchema>;
 export type DeleteMessageInput = z.infer<typeof DeleteMessageSchema>;
 export type ReactionInput = z.infer<typeof ReactionSchema>;
+export type RTCJoinInput = z.infer<typeof RTCJoinSchema>;
+export type RTCLeaveInput = z.infer<typeof RTCLeaveSchema>;
+export type RTCSignalInput = z.infer<typeof RTCSignalSchema>;
+export type RTCMediaUpdateInput = z.infer<typeof RTCMediaUpdateSchema>;
 
 export const DMThreadCreateSchema = z.object({
   userIds: z.array(z.string().uuid()).min(1).max(10),

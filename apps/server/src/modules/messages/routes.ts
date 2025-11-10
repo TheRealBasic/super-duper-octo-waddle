@@ -15,6 +15,9 @@ export async function registerMessageRoutes(app: FastifyInstance) {
       where: { id: channelId },
     });
     if (!channel) return reply.notFound();
+    if (channel.type !== 'TEXT') {
+      return reply.badRequest('Channel does not support text messages');
+    }
 
     const membership = await prisma.serverMember.findFirst({
       where: { serverId: channel.serverId, userId: request.user!.id },
@@ -43,6 +46,9 @@ export async function registerMessageRoutes(app: FastifyInstance) {
 
     const channel = await prisma.channel.findUnique({ where: { id: channelId } });
     if (!channel) return reply.notFound();
+    if (channel.type !== 'TEXT') {
+      return reply.badRequest('Channel does not support text messages');
+    }
 
     const membership = await prisma.serverMember.findFirst({
       where: { serverId: channel.serverId, userId: request.user!.id },

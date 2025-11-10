@@ -11,6 +11,7 @@ GuildChat is a Discord-style collaboration platform implemented as a TypeScript 
 - Full-text search over messages leveraging PostgreSQL trigram indices.
 - Real-time messaging via Socket.IO using Redis pub/sub adapter for horizontal scaling.
 - Tailwind-powered React interface with Zustand state management.
+- WebRTC-powered voice and video calls for server voice channels and DM threads, signaled through Socket.IO.
 - Comprehensive Docker Compose environment (PostgreSQL, Redis, MinIO-compatible storage stub, backend, frontend).
 
 ## Monorepo Structure
@@ -121,5 +122,6 @@ Refer to `docs/er-diagram.png` for the relational model. Key tables include `Use
 - Message uploads are stored on the filesystem (`apps/server/uploads`) with image thumbnailing via `sharp`.
 - Rate limiting uses Fastify's rate-limit plugin tied into Redis token buckets.
 - The seed script provides enough sample data to exercise search, reactions, and moderation flows.
+- Voice/video media streams use browser WebRTC APIs with peer-to-peer mesh; Redis-backed signaling keeps participants in sync.
 
 Enjoy exploring GuildChat!

@@ -74,14 +74,27 @@ async function main() {
       },
     });
 
-    const channels = await Promise.all(
-      Array.from({ length: 5 }).map((_, index) =>
+    const textChannels = await Promise.all(
+      Array.from({ length: 3 }).map((_, index) =>
         prisma.channel.create({
           data: {
             serverId: server.id,
-            name: `channel-${index + 1}`,
+            name: `text-${index + 1}`,
             position: index + 1,
             type: 'TEXT',
+          },
+        }),
+      ),
+    );
+
+    await Promise.all(
+      Array.from({ length: 2 }).map((_, index) =>
+        prisma.channel.create({
+          data: {
+            serverId: server.id,
+            name: `voice-${index + 1}`,
+            position: index + 1 + textChannels.length,
+            type: 'VOICE',
           },
         }),
       ),
@@ -110,7 +123,7 @@ async function main() {
       });
     }
 
-    for (const channel of channels) {
+    for (const channel of textChannels) {
       for (let m = 0; m < 200; m++) {
         const author = members[(m + s) % members.length];
         const message = await prisma.message.create({

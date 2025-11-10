@@ -27,7 +27,7 @@ export async function registerChannelRoutes(app: FastifyInstance) {
         name: data.name,
         parentId: data.parentId ?? undefined,
         isPrivate: data.isPrivate ?? false,
-        type: 'TEXT',
+        type: data.type,
         position: (lastChannel?.position ?? 0) + 1,
       },
     });

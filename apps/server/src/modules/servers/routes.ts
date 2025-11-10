@@ -57,6 +57,15 @@ export async function registerServerRoutes(app: FastifyInstance) {
       },
     });
 
+    await prisma.channel.create({
+      data: {
+        serverId: server.id,
+        name: 'Voice Lounge',
+        type: 'VOICE',
+        position: 2,
+      },
+    });
+
     return { server };
   });
 

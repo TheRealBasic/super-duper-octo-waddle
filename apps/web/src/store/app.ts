@@ -11,6 +11,7 @@ type ChannelSummary = {
   id: string;
   name: string;
   serverId: string;
+  type: 'TEXT' | 'VOICE';
 };
 
 type ThreadSummary = {

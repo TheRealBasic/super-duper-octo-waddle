@@ -77,6 +77,7 @@ GuildChat is a Discord-style collaboration platform implemented as a TypeScript 
 - Full-text search over messages leveraging PostgreSQL trigram indices.
 - Real-time messaging via Socket.IO using Redis pub/sub adapter for horizontal scaling.
 - Tailwind-powered React interface with Zustand state management.
+- WebRTC-powered voice and video calls for server voice channels and DM threads, signaled through Socket.IO.
 - Comprehensive Docker Compose environment (PostgreSQL, Redis, MinIO-compatible storage stub, backend, frontend).
 
 ## Monorepo Structure
@@ -187,9 +188,9 @@ Refer to `docs/er-diagram.png` for the relational model. Key tables include `Use
 - Message uploads are stored on the filesystem (`apps/server/uploads`) with image thumbnailing via `sharp`.
 - Rate limiting uses Fastify's rate-limit plugin tied into Redis token buckets.
 - The seed script provides enough sample data to exercise search, reactions, and moderation flows.
+- Voice/video media streams use browser WebRTC APIs with peer-to-peer mesh; Redis-backed signaling keeps participants in sync.
 
 Enjoy exploring GuildChat!
-
 EOF
 mkdir -p 'apps/server'
 cat <<'EOF' > 'apps/server/package.json'
@@ -681,14 +682,27 @@ async function main() {
       },
     });
 
-    const channels = await Promise.all(
-      Array.from({ length: 5 }).map((_, index) =>
+    const textChannels = await Promise.all(
+      Array.from({ length: 3 }).map((_, index) =>
         prisma.channel.create({
           data: {
             serverId: server.id,
-            name: `channel-${index + 1}`,
+            name: `text-${index + 1}`,
             position: index + 1,
             type: 'TEXT',
+          },
+        }),
+      ),
+    );
+
+    await Promise.all(
+      Array.from({ length: 2 }).map((_, index) =>
+        prisma.channel.create({
+          data: {
+            serverId: server.id,
+            name: `voice-${index + 1}`,
+            position: index + 1 + textChannels.length,
+            type: 'VOICE',
           },
         }),
       ),
@@ -717,7 +731,7 @@ async function main() {
       });
     }
 
-    for (const channel of channels) {
+    for (const channel of textChannels) {
       for (let m = 0; m < 200; m++) {
         const author = members[(m + s) % members.length];
         const message = await prisma.message.create({
@@ -751,7 +765,6 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
-
 EOF
 mkdir -p 'apps/server/src/auth'
 cat <<'EOF' > 'apps/server/src/auth/jwt.ts'
@@ -1278,7 +1291,7 @@ export async function registerChannelRoutes(app: FastifyInstance) {
         name: data.name,
         parentId: data.parentId ?? undefined,
         isPrivate: data.isPrivate ?? false,
-        type: 'TEXT',
+        type: data.type,
         position: (lastChannel?.position ?? 0) + 1,
       },
     });
@@ -1286,7 +1299,6 @@ export async function registerChannelRoutes(app: FastifyInstance) {
     return { channel };
   });
 }
-
 EOF
 mkdir -p 'apps/server/src/modules/dms'
 cat <<'EOF' > 'apps/server/src/modules/dms/routes.ts'
@@ -1418,6 +1430,9 @@ export async function registerMessageRoutes(app: FastifyInstance) {
       where: { id: channelId },
     });
     if (!channel) return reply.notFound();
+    if (channel.type !== 'TEXT') {
+      return reply.badRequest('Channel does not support text messages');
+    }
 
     const membership = await prisma.serverMember.findFirst({
       where: { serverId: channel.serverId, userId: request.user!.id },
@@ -1446,6 +1461,9 @@ export async function registerMessageRoutes(app: FastifyInstance) {
 
     const channel = await prisma.channel.findUnique({ where: { id: channelId } });
     if (!channel) return reply.notFound();
+    if (channel.type !== 'TEXT') {
+      return reply.badRequest('Channel does not support text messages');
+    }
 
     const membership = await prisma.serverMember.findFirst({
       where: { serverId: channel.serverId, userId: request.user!.id },
@@ -1499,7 +1517,6 @@ async function getMessageTimestamp(messageId: string) {
   const message = await prisma.message.findUnique({ where: { id: messageId } });
   return message?.createdAt ?? new Date();
 }
-
 EOF
 mkdir -p 'apps/server/src/modules/moderation'
 cat <<'EOF' > 'apps/server/src/modules/moderation/routes.ts'
@@ -1720,6 +1737,15 @@ export async function registerServerRoutes(app: FastifyInstance) {
       },
     });
 
+    await prisma.channel.create({
+      data: {
+        serverId: server.id,
+        name: 'Voice Lounge',
+        type: 'VOICE',
+        position: 2,
+      },
+    });
+
     return { server };
   });
 
@@ -1824,7 +1850,6 @@ export async function registerServerRoutes(app: FastifyInstance) {
     return { success: true };
   });
 }
-
 EOF
 mkdir -p 'apps/server/src/modules/uploads'
 cat <<'EOF' > 'apps/server/src/modules/uploads/routes.ts'
@@ -1879,7 +1904,16 @@ import type { FastifyInstance } from 'fastify';
 import { redis, redisSubscriber } from '../utils/redis.js';
 import { verifyAccessToken } from '../auth/jwt.js';
 import { prisma } from '../utils/prisma.js';
-import { PresenceUpdateSchema, TypingEventSchema, CreateMessageSchema, ReactionSchema } from '@acme/shared';
+import {
+  PresenceUpdateSchema,
+  TypingEventSchema,
+  CreateMessageSchema,
+  ReactionSchema,
+  RTCJoinSchema,
+  RTCLeaveSchema,
+  RTCSignalSchema,
+  RTCMediaUpdateSchema,
+} from '@acme/shared';
 import cookie from 'cookie';
 
 export function createRealtimeServer(app: FastifyInstance) {
@@ -1910,10 +1944,65 @@ export function createRealtimeServer(app: FastifyInstance) {
     }
   });
 
+  const voiceRooms = new Map<string, Set<string>>();
+  const voiceVideoState = new Map<string, Map<string, boolean>>();
+
+  function roomKeyFromPayload(payload: { channelId?: string; threadId?: string }) {
+    if (payload.channelId) {
+      return { key: `voice:channel:${payload.channelId}`, room: { channelId: payload.channelId } };
+    }
+    if (payload.threadId) {
+      return { key: `voice:thread:${payload.threadId}`, room: { threadId: payload.threadId } };
+    }
+    throw new Error('Invalid room');
+  }
+
+  function deserializeRoomKey(key: string) {
+    if (key.startsWith('voice:channel:')) {
+      return { channelId: key.split(':')[2] };
+    }
+    if (key.startsWith('voice:thread:')) {
+      return { threadId: key.split(':')[2] };
+    }
+    return {};
+  }
+
+  async function ensureVoiceJoin(payload: { channelId?: string; threadId?: string }, userId: string) {
+    if (payload.channelId) {
+      const channel = await prisma.channel.findUnique({ where: { id: payload.channelId } });
+      if (!channel || channel.type !== 'VOICE') {
+        throw new Error('Invalid channel');
+      }
+      const membership = await prisma.serverMember.findFirst({
+        where: { serverId: channel.serverId, userId },
+      });
+      if (!membership) {
+        throw new Error('Forbidden');
+      }
+      return roomKeyFromPayload(payload);
+    }
+    if (payload.threadId) {
+      const thread = await prisma.dMThread.findUnique({
+        where: { id: payload.threadId },
+        include: { participants: true },
+      });
+      if (!thread) {
+        throw new Error('Invalid thread');
+      }
+      const isParticipant = thread.participants.some((p) => p.userId === userId);
+      if (!isParticipant) {
+        throw new Error('Forbidden');
+      }
+      return roomKeyFromPayload(payload);
+    }
+    throw new Error('Invalid room');
+  }
+
   io.on('connection', (socket) => {
     const user = (socket.data as any).user;
 
     socket.join(`user:${user.id}`);
+    const joinedVoiceRooms = new Set<string>();
 
     socket.on('presence.update', async (payload) => {
       const parsed = PresenceUpdateSchema.safeParse(payload);
@@ -2042,11 +2131,109 @@ export function createRealtimeServer(app: FastifyInstance) {
         userId: user.id,
       });
     });
+
+    socket.on('rtc.join', async (payload) => {
+      const parsed = RTCJoinSchema.safeParse(payload);
+      if (!parsed.success) return;
+      try {
+        const { key, room } = await ensureVoiceJoin(parsed.data, user.id);
+        joinedVoiceRooms.add(key);
+        socket.join(key);
+        const participants = voiceRooms.get(key) ?? new Set<string>();
+        voiceRooms.set(key, participants);
+        participants.add(user.id);
+        const videoState = voiceVideoState.get(key) ?? new Map<string, boolean>();
+        voiceVideoState.set(key, videoState);
+        const enableVideo = parsed.data.enableVideo ?? false;
+        videoState.set(user.id, enableVideo);
+        const others = Array.from(participants)
+          .filter((id) => id !== user.id)
+          .map((id) => ({ userId: id, videoEnabled: videoState.get(id) ?? false }));
+        socket.emit('rtc.participants', { room, participants: others });
+        socket.to(key).emit('rtc.participant-joined', { room, userId: user.id, videoEnabled: enableVideo });
+      } catch (err) {
+        app.log.warn({ err }, 'voice join failed');
+      }
+    });
+
+    socket.on('rtc.leave', async (payload) => {
+      const parsed = RTCLeaveSchema.safeParse(payload);
+      if (!parsed.success) return;
+      try {
+        const { key, room } = roomKeyFromPayload(parsed.data);
+        if (!joinedVoiceRooms.has(key)) return;
+        joinedVoiceRooms.delete(key);
+        socket.leave(key);
+        const participants = voiceRooms.get(key);
+        if (participants) {
+          participants.delete(user.id);
+          if (participants.size === 0) {
+            voiceRooms.delete(key);
+          }
+        }
+        const videoState = voiceVideoState.get(key);
+        videoState?.delete(user.id);
+        socket.to(key).emit('rtc.participant-left', { room, userId: user.id });
+      } catch (err) {
+        app.log.warn({ err }, 'voice leave failed');
+      }
+    });
+
+    socket.on('rtc.signal', async (payload) => {
+      const parsed = RTCSignalSchema.safeParse(payload);
+      if (!parsed.success) return;
+      try {
+        const { key, room } = roomKeyFromPayload(parsed.data);
+        if (!joinedVoiceRooms.has(key)) return;
+        const participants = voiceRooms.get(key);
+        if (!participants || !participants.has(parsed.data.targetUserId)) return;
+        io.to(`user:${parsed.data.targetUserId}`).emit('rtc.signal', {
+          room,
+          fromUserId: user.id,
+          payload: parsed.data.payload,
+        });
+      } catch (err) {
+        app.log.warn({ err }, 'voice signal failed');
+      }
+    });
+
+    socket.on('rtc.media-update', async (payload) => {
+      const parsed = RTCMediaUpdateSchema.safeParse(payload);
+      if (!parsed.success) return;
+      try {
+        const { key, room } = roomKeyFromPayload(parsed.data);
+        if (!joinedVoiceRooms.has(key)) return;
+        const videoState = voiceVideoState.get(key) ?? new Map<string, boolean>();
+        voiceVideoState.set(key, videoState);
+        videoState.set(user.id, parsed.data.videoEnabled);
+        socket.to(key).emit('rtc.media-updated', {
+          room,
+          userId: user.id,
+          videoEnabled: parsed.data.videoEnabled,
+        });
+      } catch (err) {
+        app.log.warn({ err }, 'voice media update failed');
+      }
+    });
+
+    socket.on('disconnect', () => {
+      for (const key of joinedVoiceRooms) {
+        const room = deserializeRoomKey(key);
+        const participants = voiceRooms.get(key);
+        participants?.delete(user.id);
+        if (participants && participants.size === 0) {
+          voiceRooms.delete(key);
+        }
+        const videoState = voiceVideoState.get(key);
+        videoState?.delete(user.id);
+        socket.to(key).emit('rtc.participant-left', { room, userId: user.id });
+      }
+      joinedVoiceRooms.clear();
+    });
   });
 
   return io;
 }
-
 EOF
 mkdir -p 'apps/server/src/types'
 cat <<'EOF' > 'apps/server/src/types/fastify.d.ts'
@@ -2256,6 +2443,137 @@ export default function MessageComposer({ onSubmit }: MessageComposerProps) {
 }
 
 EOF
+cat <<'EOF' > 'apps/web/src/components/VoiceRoom.tsx'
+import { useEffect, useMemo, useRef } from 'react';
+import { Mic, MicOff, Phone, PhoneOff, Video, VideoOff } from 'lucide-react';
+
+type Participant = {
+  userId: string;
+  stream?: MediaStream;
+  videoEnabled: boolean;
+  isLocal?: boolean;
+};
+
+interface VoiceRoomProps {
+  joined: boolean;
+  joining: boolean;
+  participants: Participant[];
+  audioEnabled: boolean;
+  videoEnabled: boolean;
+  onJoinAudio: () => void;
+  onJoinVideo: () => void;
+  onLeave: () => void;
+  onToggleMute: () => void;
+  onToggleVideo: () => void;
+}
+
+function ParticipantTile({ participant }: { participant: Participant }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  useEffect(() => {
+    if (participant.stream && videoRef.current) {
+      if (videoRef.current.srcObject !== participant.stream) {
+        videoRef.current.srcObject = participant.stream;
+      }
+    }
+  }, [participant.stream]);
+  useEffect(() => {
+    if (!participant.isLocal && participant.stream && audioRef.current) {
+      audioRef.current.srcObject = participant.stream;
+      const play = () => {
+        audioRef.current?.play().catch(() => undefined);
+      };
+      play();
+    }
+  }, [participant.stream, participant.isLocal]);
+  const label = participant.isLocal ? 'You' : participant.userId.slice(0, 8);
+  return (
+    <div className="flex flex-col rounded-lg border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
+      {participant.videoEnabled && participant.stream ? (
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted={participant.isLocal}
+          className="h-40 w-full rounded-md object-cover"
+        />
+      ) : (
+        <div className="flex h-40 w-full items-center justify-center rounded-md bg-white/10 text-sm text-white/70">
+          {participant.isLocal ? 'Audio only' : 'Voice' }
+        </div>
+      )}
+      {!participant.isLocal && <audio ref={audioRef} autoPlay hidden />}
+      <div className="mt-2 text-center text-xs font-medium text-white/80">{label}</div>
+    </div>
+  );
+}
+
+export default function VoiceRoom(props: VoiceRoomProps) {
+  const participantList = useMemo(() => props.participants, [props.participants]);
+  if (!props.joined) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-4">
+        <p className="text-sm text-white/70">Join the call to start talking with your friends.</p>
+        <div className="flex gap-3">
+          <button
+            onClick={props.onJoinAudio}
+            disabled={props.joining}
+            className="inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-60"
+          >
+            <Phone className="h-4 w-4" /> Join Voice
+          </button>
+          <button
+            onClick={props.onJoinVideo}
+            disabled={props.joining}
+            className="inline-flex items-center gap-2 rounded-full border border-white/20 px-5 py-2 text-sm font-medium text-white hover:bg-white/10 disabled:opacity-60"
+          >
+            <Video className="h-4 w-4" /> Join with Video
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
+        <div className="flex gap-3">
+          <button
+            onClick={props.onToggleMute}
+            className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm font-medium text-white hover:bg-white/20"
+          >
+            {props.audioEnabled ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4 text-red-400" />} 
+            {props.audioEnabled ? 'Mute' : 'Unmute'}
+          </button>
+          <button
+            onClick={props.onToggleVideo}
+            className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm font-medium text-white hover:bg-white/20"
+          >
+            {props.videoEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4 text-red-400" />} 
+            {props.videoEnabled ? 'Disable Video' : 'Enable Video'}
+          </button>
+        </div>
+        <button
+          onClick={props.onLeave}
+          className="inline-flex items-center gap-2 rounded-full bg-red-500/80 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500"
+        >
+          <PhoneOff className="h-4 w-4" /> Leave
+        </button>
+      </div>
+      <div className="grid flex-1 grid-cols-1 gap-4 overflow-y-auto p-6 sm:grid-cols-2 lg:grid-cols-3">
+        {participantList.length === 0 && (
+          <div className="col-span-full flex h-full items-center justify-center rounded-lg border border-dashed border-white/20 text-sm text-white/60">
+            Waiting for others to join…
+          </div>
+        )}
+        {participantList.map((participant) => (
+          <ParticipantTile key={participant.userId} participant={participant} />
+        ))}
+      </div>
+    </div>
+  );
+}
+EOF
 mkdir -p 'apps/web/src/components'
 cat <<'EOF' > 'apps/web/src/components/MessageList.tsx'
 import { useMemo } from 'react';
@@ -2317,7 +2635,7 @@ import { Link, Outlet, useLocation, useNavigate, useParams } from 'react-router-
 import { useAuthStore } from '../store/auth';
 import { useAppStore } from '../store/app';
 import { useRealtimeStore } from '../store/realtime';
-import { Plus, LogOut, MessageCircle } from 'lucide-react';
+import { Plus, LogOut, MessageCircle, Hash, Mic } from 'lucide-react';
 import { api } from '../lib/api';
 
 export default function AppLayout() {
@@ -2413,7 +2731,10 @@ export default function AppLayout() {
                       location.pathname.includes(channel.id) ? 'bg-accent/30 text-white' : 'text-white/70 hover:bg-white/10'
                     }`}
                   >
-                    # {channel.name}
+                    <span className="inline-flex items-center gap-2">
+                      {channel.type === 'VOICE' ? <Mic className="h-4 w-4" /> : <Hash className="h-4 w-4" />}
+                      <span>{channel.name}</span>
+                    </span>
                   </Link>
                 </li>
               ))}
@@ -2458,7 +2779,6 @@ export default function AppLayout() {
     </div>
   );
 }
-
 EOF
 mkdir -p 'apps/web/src/layouts'
 cat <<'EOF' > 'apps/web/src/layouts/AuthLayout.tsx'
@@ -2509,11 +2829,13 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 EOF
 mkdir -p 'apps/web/src/pages'
 cat <<'EOF' > 'apps/web/src/pages/DMView.tsx'
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import MessageList from '../components/MessageList';
 import MessageComposer from '../components/MessageComposer';
 import { api } from '../lib/api';
+import { useVoiceStore } from '../store/voice';
+import VoiceRoom from '../components/VoiceRoom';
 
 interface Message {
   id: string;
@@ -2526,6 +2848,29 @@ interface Message {
 export default function DMView() {
   const { threadId } = useParams();
   const [messages, setMessages] = useState<Message[]>([]);
+  const {
+    currentRoom,
+    participants,
+    audioEnabled,
+    videoEnabled,
+    joining,
+    joinThread,
+    leave,
+    toggleMute,
+    toggleVideo,
+  } = useVoiceStore((state) => ({
+    currentRoom: state.currentRoom,
+    participants: state.participants,
+    audioEnabled: state.audioEnabled,
+    videoEnabled: state.videoEnabled,
+    joining: state.joining,
+    joinThread: state.joinThread,
+    leave: state.leave,
+    toggleMute: state.toggleMute,
+    toggleVideo: state.toggleVideo,
+  }));
+  const joined = currentRoom?.threadId === threadId;
+  const participantList = useMemo(() => Object.values(participants), [participants]);
 
   async function loadMessages() {
     if (!threadId) return;
@@ -2536,6 +2881,12 @@ export default function DMView() {
   useEffect(() => {
     loadMessages();
   }, [threadId]);
+
+  useEffect(() => {
+    if (currentRoom?.threadId && currentRoom.threadId !== threadId) {
+      void leave();
+    }
+  }, [currentRoom?.threadId, threadId, leave]);
 
   async function handleSend(content: string, file?: File) {
     if (!threadId) return;
@@ -2563,12 +2914,27 @@ export default function DMView() {
 
   return (
     <div className="flex h-full flex-col">
-      <MessageList messages={messages} />
-      <MessageComposer onSubmit={handleSend} />
+      <div className="mb-4 h-80 overflow-hidden rounded-lg border border-white/10 bg-white/5">
+        <VoiceRoom
+          joined={Boolean(joined)}
+          joining={joining}
+          audioEnabled={audioEnabled}
+          videoEnabled={videoEnabled}
+          participants={participantList}
+          onJoinAudio={() => threadId && joinThread(threadId, false)}
+          onJoinVideo={() => threadId && joinThread(threadId, true)}
+          onLeave={() => void leave()}
+          onToggleMute={toggleMute}
+          onToggleVideo={toggleVideo}
+        />
+      </div>
+      <div className="flex flex-1 flex-col">
+        <MessageList messages={messages} />
+        <MessageComposer onSubmit={handleSend} />
+      </div>
     </div>
   );
 }
-
 EOF
 mkdir -p 'apps/web/src/pages'
 cat <<'EOF' > 'apps/web/src/pages/LoginPage.tsx'
@@ -2696,11 +3062,14 @@ export default function RegisterPage() {
 EOF
 mkdir -p 'apps/web/src/pages'
 cat <<'EOF' > 'apps/web/src/pages/ServerView.tsx'
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import MessageList from '../components/MessageList';
 import MessageComposer from '../components/MessageComposer';
 import { api } from '../lib/api';
+import { useAppStore } from '../store/app';
+import { useVoiceStore } from '../store/voice';
+import VoiceRoom from '../components/VoiceRoom';
 
 interface Message {
   id: string;
@@ -2711,21 +3080,54 @@ interface Message {
 }
 
 export default function ServerView() {
-  const { channelId } = useParams();
+  const { channelId, serverId } = useParams();
   const [messages, setMessages] = useState<Message[]>([]);
+  const channel = useAppStore(
+    (state) =>
+      (serverId && channelId && state.channels[serverId]?.find((c) => c.id === channelId)) || undefined,
+  );
+  const {
+    currentRoom,
+    participants,
+    audioEnabled,
+    videoEnabled,
+    joining,
+    joinChannel,
+    leave,
+    toggleMute,
+    toggleVideo,
+  } = useVoiceStore((state) => ({
+    currentRoom: state.currentRoom,
+    participants: state.participants,
+    audioEnabled: state.audioEnabled,
+    videoEnabled: state.videoEnabled,
+    joining: state.joining,
+    joinChannel: state.joinChannel,
+    leave: state.leave,
+    toggleMute: state.toggleMute,
+    toggleVideo: state.toggleVideo,
+  }));
+  const joined = currentRoom?.channelId === channelId;
+  const participantList = useMemo(() => Object.values(participants), [participants]);
 
   async function loadMessages() {
-    if (!channelId) return;
+    if (!channelId || channel?.type !== 'TEXT') return;
     const { data } = await api.get(`/channels/${channelId}/messages`);
     setMessages(data.messages);
   }
 
   useEffect(() => {
     loadMessages();
-  }, [channelId]);
+  }, [channelId, channel?.type]);
+
+  useEffect(() => {
+    if (currentRoom?.channelId && currentRoom.channelId !== channelId) {
+      void leave();
+    }
+  }, [currentRoom?.channelId, channelId, leave]);
 
   async function handleSend(content: string, file?: File) {
-    if (!channelId) return;
+    if (!channelId || channel?.type !== 'TEXT') return;
     let attachments: { url: string; mime: string; size: number }[] = [];
     if (file) {
       const form = new FormData();
@@ -2748,6 +3150,23 @@ export default function ServerView() {
     setMessages((prev) => [...prev, data.message]);
   }
 
+  if (channel?.type === 'VOICE' && channelId) {
+    return (
+      <VoiceRoom
+        joined={joined}
+        joining={joining}
+        audioEnabled={audioEnabled}
+        videoEnabled={videoEnabled}
+        participants={participantList}
+        onJoinAudio={() => joinChannel(channelId, false)}
+        onJoinVideo={() => joinChannel(channelId, true)}
+        onLeave={() => void leave()}
+        onToggleMute={toggleMute}
+        onToggleVideo={toggleVideo}
+      />
+    );
+  }
+
   return (
     <div className="flex h-full flex-col">
       <MessageList messages={messages} />
@@ -2755,7 +3174,6 @@ export default function ServerView() {
     </div>
   );
 }
-
 EOF
 mkdir -p 'apps/web/src/routes'
 cat <<'EOF' > 'apps/web/src/routes/index.tsx'
@@ -2825,6 +3243,7 @@ type ChannelSummary = {
   id: string;
   name: string;
   serverId: string;
+  type: 'TEXT' | 'VOICE';
 };
 
 type ThreadSummary = {
@@ -2867,7 +3286,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ dmThreads: data.threads });
   },
 }));
-
 EOF
 mkdir -p 'apps/web/src/store'
 cat <<'EOF' > 'apps/web/src/store/auth.ts'
@@ -2966,6 +3384,418 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
   },
 }));
 
+EOF
+cat <<'EOF' > 'apps/web/src/store/voice.ts'
+import { create } from 'zustand';
+import type { Socket } from 'socket.io-client';
+import { useRealtimeStore } from './realtime';
+import { useAuthStore } from './auth';
+
+type VoiceRoom = { channelId?: string; threadId?: string };
+
+type Participant = {
+  userId: string;
+  stream?: MediaStream;
+  videoEnabled: boolean;
+  isLocal?: boolean;
+};
+
+interface VoiceState {
+  currentRoom?: VoiceRoom;
+  participants: Record<string, Participant>;
+  localStream?: MediaStream;
+  audioEnabled: boolean;
+  videoEnabled: boolean;
+  joining: boolean;
+  joinChannel: (channelId: string, enableVideo?: boolean) => Promise<void>;
+  joinThread: (threadId: string, enableVideo?: boolean) => Promise<void>;
+  leave: () => Promise<void>;
+  toggleMute: () => void;
+  toggleVideo: () => Promise<void>;
+}
+
+const peerConnections = new Map<string, RTCPeerConnection>();
+let socketBound = false;
+
+export const useVoiceStore = create<VoiceState>((set, get) => ({
+  currentRoom: undefined,
+  participants: {},
+  localStream: undefined,
+  audioEnabled: false,
+  videoEnabled: false,
+  joining: false,
+  async joinChannel(channelId, enableVideo = false) {
+    await get().leave();
+    set({ joining: true });
+    try {
+      const socket = await ensureSocket();
+      const media = await navigator.mediaDevices.getUserMedia({ audio: true, video: enableVideo });
+      const stream = media;
+      const user = useAuthStore.getState().user;
+      const participants: Record<string, Participant> = {};
+      if (user) {
+        participants[user.id] = {
+          userId: user.id,
+          stream,
+          videoEnabled: enableVideo,
+          isLocal: true,
+        };
+      }
+      stream.getAudioTracks().forEach((track) => {
+        track.enabled = true;
+      });
+      if (!enableVideo) {
+        stream.getVideoTracks().forEach((track) => {
+          track.enabled = false;
+        });
+      }
+      peerConnections.clear();
+      set({
+        currentRoom: { channelId },
+        localStream: stream,
+        participants,
+        audioEnabled: true,
+        videoEnabled: enableVideo,
+        joining: false,
+      });
+      socket.emit('rtc.join', { channelId, enableVideo });
+    } catch (error) {
+      console.error('Failed to join channel call', error);
+      set({ joining: false });
+    }
+  },
+  async joinThread(threadId, enableVideo = false) {
+    await get().leave();
+    set({ joining: true });
+    try {
+      const socket = await ensureSocket();
+      const media = await navigator.mediaDevices.getUserMedia({ audio: true, video: enableVideo });
+      const stream = media;
+      const user = useAuthStore.getState().user;
+      const participants: Record<string, Participant> = {};
+      if (user) {
+        participants[user.id] = {
+          userId: user.id,
+          stream,
+          videoEnabled: enableVideo,
+          isLocal: true,
+        };
+      }
+      stream.getAudioTracks().forEach((track) => {
+        track.enabled = true;
+      });
+      if (!enableVideo) {
+        stream.getVideoTracks().forEach((track) => {
+          track.enabled = false;
+        });
+      }
+      peerConnections.clear();
+      set({
+        currentRoom: { threadId },
+        localStream: stream,
+        participants,
+        audioEnabled: true,
+        videoEnabled: enableVideo,
+        joining: false,
+      });
+      socket.emit('rtc.join', { threadId, enableVideo });
+    } catch (error) {
+      console.error('Failed to join DM call', error);
+      set({ joining: false });
+    }
+  },
+  async leave() {
+    const { currentRoom, localStream } = get();
+    const socket = useRealtimeStore.getState().socket;
+    if (currentRoom && socket) {
+      socket.emit('rtc.leave', currentRoom);
+    }
+    peerConnections.forEach((pc) => pc.close());
+    peerConnections.clear();
+    localStream?.getTracks().forEach((track) => track.stop());
+    set({
+      currentRoom: undefined,
+      participants: {},
+      localStream: undefined,
+      audioEnabled: false,
+      videoEnabled: false,
+      joining: false,
+    });
+  },
+  toggleMute() {
+    const { localStream, audioEnabled } = get();
+    if (!localStream) return;
+    localStream.getAudioTracks().forEach((track) => {
+      track.enabled = !audioEnabled;
+    });
+    set({ audioEnabled: !audioEnabled });
+  },
+  async toggleVideo() {
+    const { localStream, videoEnabled, currentRoom, participants } = get();
+    if (!localStream || !currentRoom) return;
+    const socket = useRealtimeStore.getState().socket;
+    const userId = useAuthStore.getState().user?.id;
+    if (videoEnabled) {
+      const track = localStream.getVideoTracks()[0];
+      if (track) {
+        track.stop();
+        localStream.removeTrack(track);
+      }
+      peerConnections.forEach((pc) => {
+        pc.getSenders()
+          .filter((sender) => sender.track?.kind === 'video')
+          .forEach((sender) => sender.replaceTrack(null));
+      });
+      socket?.emit('rtc.media-update', { ...currentRoom, videoEnabled: false });
+      if (userId) {
+        set({
+          videoEnabled: false,
+          participants: {
+            ...participants,
+            [userId]: {
+              ...(participants[userId] ?? { userId }),
+              stream: localStream,
+              videoEnabled: false,
+              isLocal: true,
+            },
+          },
+        });
+      } else {
+        set({ videoEnabled: false });
+      }
+    } else {
+      try {
+        const media = await navigator.mediaDevices.getUserMedia({ video: true });
+        const newTrack = media.getVideoTracks()[0];
+        if (!newTrack) return;
+        localStream.addTrack(newTrack);
+        peerConnections.forEach((pc) => {
+          const sender = pc.getSenders().find((s) => s.track?.kind === 'video');
+          if (sender) {
+            sender.replaceTrack(newTrack);
+          } else {
+            pc.addTrack(newTrack, localStream);
+          }
+        });
+        socket?.emit('rtc.media-update', { ...currentRoom, videoEnabled: true });
+        if (userId) {
+          set({
+            videoEnabled: true,
+            participants: {
+              ...participants,
+              [userId]: {
+                ...(participants[userId] ?? { userId }),
+                stream: localStream,
+                videoEnabled: true,
+                isLocal: true,
+              },
+            },
+          });
+        } else {
+          set({ videoEnabled: true });
+        }
+      } catch (error) {
+        console.error('Unable to enable video', error);
+      }
+    }
+  },
+}));
+
+function roomMatches(a?: VoiceRoom, b?: VoiceRoom) {
+  if (!a || !b) return false;
+  if (a.channelId && b.channelId) return a.channelId === b.channelId;
+  if (a.threadId && b.threadId) return a.threadId === b.threadId;
+  return false;
+}
+
+function ensureSocket(): Promise<Socket> {
+  return new Promise((resolve, reject) => {
+    let socket = useRealtimeStore.getState().socket;
+    if (!socket) {
+      useRealtimeStore.getState().connect();
+      socket = useRealtimeStore.getState().socket;
+    }
+    if (!socket) {
+      reject(new Error('Realtime connection unavailable'));
+      return;
+    }
+    if (!socketBound) {
+      bindSocketEvents(socket);
+      socketBound = true;
+    }
+    if (socket.connected) {
+      resolve(socket);
+    } else {
+      socket.once('connect', () => resolve(socket!));
+    }
+  });
+}
+
+function bindSocketEvents(socket: Socket) {
+  socket.on('rtc.participants', ({ room, participants }) => {
+    const state = useVoiceStore.getState();
+    if (!roomMatches(room, state.currentRoom)) return;
+    useVoiceStore.setState((prev) => {
+      const next = { ...prev.participants };
+      participants.forEach((participant: { userId: string; videoEnabled: boolean }) => {
+        next[participant.userId] = {
+          ...(next[participant.userId] ?? { userId: participant.userId }),
+          videoEnabled: participant.videoEnabled,
+        };
+      });
+      return { participants: next };
+    });
+    participants.forEach((participant: { userId: string }) => {
+      createPeerConnection(participant.userId, true);
+    });
+  });
+
+  socket.on('rtc.participant-joined', ({ room, userId, videoEnabled }) => {
+    const state = useVoiceStore.getState();
+    if (!roomMatches(room, state.currentRoom)) return;
+    useVoiceStore.setState((prev) => ({
+      participants: {
+        ...prev.participants,
+        [userId]: {
+          ...(prev.participants[userId] ?? { userId }),
+          videoEnabled: Boolean(videoEnabled),
+        },
+      },
+    }));
+  });
+
+  socket.on('rtc.participant-left', ({ room, userId }) => {
+    const state = useVoiceStore.getState();
+    if (!roomMatches(room, state.currentRoom)) return;
+    peerConnections.get(userId)?.close();
+    peerConnections.delete(userId);
+    useVoiceStore.setState((prev) => {
+      const next = { ...prev.participants };
+      delete next[userId];
+      return { participants: next };
+    });
+  });
+
+  socket.on('rtc.media-updated', ({ room, userId, videoEnabled }) => {
+    const state = useVoiceStore.getState();
+    if (!roomMatches(room, state.currentRoom)) return;
+    useVoiceStore.setState((prev) => ({
+      participants: {
+        ...prev.participants,
+        [userId]: {
+          ...(prev.participants[userId] ?? { userId }),
+          videoEnabled: Boolean(videoEnabled),
+          stream: prev.participants[userId]?.stream,
+        },
+      },
+    }));
+  });
+
+  socket.on('rtc.signal', async ({ room, fromUserId, payload }) => {
+    const state = useVoiceStore.getState();
+    if (!roomMatches(room, state.currentRoom)) return;
+    const pc = createPeerConnection(fromUserId, false);
+    const sendSignal = (data: any) => {
+      const activeRoom = useVoiceStore.getState().currentRoom;
+      if (!activeRoom) return;
+      socket.emit('rtc.signal', {
+        ...activeRoom,
+        targetUserId: fromUserId,
+        payload: data,
+      });
+    };
+    if (!pc) return;
+    try {
+      if (payload.type === 'offer') {
+        await pc.setRemoteDescription({ type: 'offer', sdp: payload.sdp });
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        sendSignal({ type: 'answer', sdp: answer.sdp ?? '' });
+      } else if (payload.type === 'answer') {
+        await pc.setRemoteDescription({ type: 'answer', sdp: payload.sdp });
+      } else if (payload.type === 'ice') {
+        await pc.addIceCandidate({
+          candidate: payload.candidate.candidate,
+          sdpMid: payload.candidate.sdpMid ?? undefined,
+          sdpMLineIndex: payload.candidate.sdpMLineIndex ?? undefined,
+        });
+      }
+    } catch (error) {
+      console.error('RTC signal error', error);
+    }
+  });
+
+  socket.on('disconnect', () => {
+    useVoiceStore
+      .getState()
+      .leave()
+      .catch(() => undefined);
+  });
+}
+
+function createPeerConnection(userId: string, initiator: boolean) {
+  if (peerConnections.has(userId)) {
+    return peerConnections.get(userId)!;
+  }
+  const socket = useRealtimeStore.getState().socket;
+  const state = useVoiceStore.getState();
+  if (!socket || !state.currentRoom || !state.localStream) return;
+  const pc = new RTCPeerConnection({
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+  });
+  state.localStream.getTracks().forEach((track) => {
+    pc.addTrack(track, state.localStream!);
+  });
+  pc.ontrack = (event) => {
+    const [stream] = event.streams;
+    if (!stream) return;
+    useVoiceStore.setState((prev) => ({
+      participants: {
+        ...prev.participants,
+        [userId]: {
+          ...(prev.participants[userId] ?? { userId }),
+          stream,
+        },
+      },
+    }));
+  };
+  pc.onicecandidate = (event) => {
+    if (!event.candidate) return;
+    const room = useVoiceStore.getState().currentRoom;
+    if (!room) return;
+    socket.emit('rtc.signal', {
+      ...room,
+      targetUserId: userId,
+      payload: {
+        type: 'ice',
+        candidate: {
+          candidate: event.candidate.candidate,
+          sdpMid: event.candidate.sdpMid ?? null,
+          sdpMLineIndex: event.candidate.sdpMLineIndex ?? null,
+        },
+      },
+    });
+  };
+  peerConnections.set(userId, pc);
+  if (initiator) {
+    (async () => {
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        const room = useVoiceStore.getState().currentRoom;
+        if (!room) return;
+        socket.emit('rtc.signal', {
+          ...room,
+          targetUserId: userId,
+          payload: { type: 'offer', sdp: offer.sdp ?? '' },
+        });
+      } catch (error) {
+        console.error('RTC offer error', error);
+      }
+    })();
+  }
+  return pc;
+}
 EOF
 mkdir -p 'apps/web/src'
 cat <<'EOF' > 'apps/web/src/vite-env.d.ts'
@@ -3340,11 +4170,15 @@ export const CreateServerSchema = z.object({
   iconUrl: z.string().url().optional(),
 });
 
+export const ChannelTypes = ['TEXT', 'VOICE'] as const;
+export type ChannelType = (typeof ChannelTypes)[number];
+
 export const CreateChannelSchema = z.object({
   serverId: z.string().uuid(),
   name: z.string().min(1).max(100),
   parentId: z.string().uuid().nullable().optional(),
   isPrivate: z.boolean().optional(),
+  type: z.enum(ChannelTypes).default('TEXT'),
 });
 
 export const MessageSchema = z.object({
@@ -3368,6 +4202,11 @@ export const WebsocketEvents = {
   MESSAGE_DELETED: 'message.deleted',
   REACTION_UPDATED: 'reaction.updated',
   UNREAD_UPDATE: 'unread.update',
+  RTC_PARTICIPANTS: 'rtc.participants',
+  RTC_PARTICIPANT_JOINED: 'rtc.participant-joined',
+  RTC_PARTICIPANT_LEFT: 'rtc.participant-left',
+  RTC_SIGNAL: 'rtc.signal',
+  RTC_MEDIA_UPDATED: 'rtc.media-updated',
 } as const;
 
 export type WebsocketEventName = (typeof WebsocketEvents)[keyof typeof WebsocketEvents];
@@ -3419,6 +4258,49 @@ export const ReactionSchema = z.object({
   emoji: z.string().min(1).max(64),
 });
 
+const rtcRoomTarget = z
+  .object({
+    channelId: z.string().uuid().optional(),
+    threadId: z.string().uuid().optional(),
+  })
+  .refine((data) => data.channelId || data.threadId, {
+    message: 'channelId or threadId is required',
+  });
+
+export const RTCJoinSchema = rtcRoomTarget.extend({
+  enableVideo: z.boolean().optional(),
+});
+
+export const RTCLeaveSchema = rtcRoomTarget;
+
+const rtcOffer = z.object({
+  type: z.literal('offer'),
+  sdp: z.string(),
+});
+
+const rtcAnswer = z.object({
+  type: z.literal('answer'),
+  sdp: z.string(),
+});
+
+const rtcIceCandidate = z.object({
+  type: z.literal('ice'),
+  candidate: z.object({
+    candidate: z.string(),
+    sdpMid: z.string().nullable().optional(),
+    sdpMLineIndex: z.number().nullable().optional(),
+  }),
+});
+
+export const RTCSignalSchema = rtcRoomTarget.extend({
+  targetUserId: z.string().uuid(),
+  payload: z.union([rtcOffer, rtcAnswer, rtcIceCandidate]),
+});
+
+export const RTCMediaUpdateSchema = rtcRoomTarget.extend({
+  videoEnabled: z.boolean(),
+});
+
 export type RegisterInput = z.infer<typeof RegisterSchema>;
 export type LoginInput = z.infer<typeof LoginSchema>;
 export type CreateServerInput = z.infer<typeof CreateServerSchema>;
@@ -3430,6 +4312,10 @@ export type CreateMessageInput = z.infer<typeof CreateMessageSchema>;
 export type EditMessageInput = z.infer<typeof EditMessageSchema>;
 export type DeleteMessageInput = z.infer<typeof DeleteMessageSchema>;
 export type ReactionInput = z.infer<typeof ReactionSchema>;
+export type RTCJoinInput = z.infer<typeof RTCJoinSchema>;
+export type RTCLeaveInput = z.infer<typeof RTCLeaveSchema>;
+export type RTCSignalInput = z.infer<typeof RTCSignalSchema>;
+export type RTCMediaUpdateInput = z.infer<typeof RTCMediaUpdateSchema>;
 
 export const DMThreadCreateSchema = z.object({
   userIds: z.array(z.string().uuid()).min(1).max(10),
@@ -3466,7 +4352,6 @@ export const UploadPolicy = {
 };
 
 export const ReactionEmojis = ['👍', '❤️', '😂', '🎉', '👀', '😢'] as const;
-
 EOF
 mkdir -p 'packages/shared'
 cat <<'EOF' > 'packages/shared/tsconfig.json'

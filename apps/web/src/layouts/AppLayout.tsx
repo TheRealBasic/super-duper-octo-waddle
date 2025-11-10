@@ -3,7 +3,7 @@ import { Link, Outlet, useLocation, useNavigate, useParams } from 'react-router-
 import { useAuthStore } from '../store/auth';
 import { useAppStore } from '../store/app';
 import { useRealtimeStore } from '../store/realtime';
-import { Plus, LogOut, MessageCircle } from 'lucide-react';
+import { Plus, LogOut, MessageCircle, Hash, Mic } from 'lucide-react';
 import { api } from '../lib/api';
 
 export default function AppLayout() {
@@ -99,7 +99,10 @@ export default function AppLayout() {
                       location.pathname.includes(channel.id) ? 'bg-accent/30 text-white' : 'text-white/70 hover:bg-white/10'
                     }`}
                   >
-                    # {channel.name}
+                    <span className="inline-flex items-center gap-2">
+                      {channel.type === 'VOICE' ? <Mic className="h-4 w-4" /> : <Hash className="h-4 w-4" />}
+                      <span>{channel.name}</span>
+                    </span>
                   </Link>
                 </li>
               ))}
