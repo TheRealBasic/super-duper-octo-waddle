@@ -151,7 +151,7 @@ export function createRealtimeServer(app: FastifyInstance) {
             },
           },
         },
-        include: { attachments: true, reactions: true },
+        include: { attachments: true, reactions: true, author: true },
       });
 
       const target = message.channelId ?? message.threadId;
@@ -168,6 +168,7 @@ export function createRealtimeServer(app: FastifyInstance) {
       const updated = await prisma.message.update({
         where: { id: messageId },
         data: { content, editedAt: new Date() },
+        include: { author: true, attachments: true, reactions: true },
       });
       const target = updated.channelId ?? updated.threadId;
       if (target) io.to(target).emit('message.updated', updated);

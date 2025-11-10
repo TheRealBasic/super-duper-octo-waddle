@@ -5,12 +5,15 @@ import MessageComposer from '../components/MessageComposer';
 import { api } from '../lib/api';
 import { useVoiceStore } from '../store/voice';
 import VoiceRoom from '../components/VoiceRoom';
+import { useRealtimeStore } from '../store/realtime';
 
 interface Message {
   id: string;
-  content?: string;
+  channelId?: string | null;
+  threadId?: string | null;
+  content?: string | null;
   createdAt: string;
-  deletedAt?: string;
+  deletedAt?: string | null;
   author: { displayName: string };
 }
 
@@ -38,18 +41,83 @@ export default function DMView() {
     toggleMute: state.toggleMute,
     toggleVideo: state.toggleVideo,
   }));
+  const socket = useRealtimeStore((state) => state.socket);
   const joined = currentRoom?.threadId === threadId;
   const participantList = useMemo(() => Object.values(participants), [participants]);
+
+  function normalizeMessage(message: any): Message {
+    return {
+      id: message.id,
+      channelId: message.channelId ?? null,
+      threadId: message.threadId ?? null,
+      content: message.content ?? null,
+      createdAt: message.createdAt,
+      deletedAt: message.deletedAt ?? null,
+      author: { displayName: message.author?.displayName ?? 'Unknown User' },
+    };
+  }
+
+  function mergeMessage(list: Message[], incoming: Message) {
+    const index = list.findIndex((item) => item.id === incoming.id);
+    if (index === -1) {
+      return [...list, incoming];
+    }
+    const next = [...list];
+    next[index] = { ...next[index], ...incoming };
+    return next;
+  }
 
   async function loadMessages() {
     if (!threadId) return;
     const { data } = await api.get(`/dms/${threadId}/messages`);
-    setMessages(data.messages);
+    setMessages(data.messages.map(normalizeMessage));
   }
 
   useEffect(() => {
     loadMessages();
   }, [threadId]);
+
+  useEffect(() => {
+    if (!socket || !threadId) return;
+    socket.emit('channel.join', threadId);
+    return () => {
+      socket.emit('channel.leave', threadId);
+    };
+  }, [socket, threadId]);
+
+  useEffect(() => {
+    if (!socket || !threadId) return;
+
+    const handleCreated = (message: any) => {
+      if (message.threadId !== threadId) return;
+      setMessages((prev) => mergeMessage(prev, normalizeMessage(message)));
+    };
+
+    const handleUpdated = (message: any) => {
+      if (message.threadId !== threadId) return;
+      setMessages((prev) => mergeMessage(prev, normalizeMessage(message)));
+    };
+
+    const handleDeleted = ({ messageId }: { messageId: string }) => {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId
+            ? { ...msg, deletedAt: new Date().toISOString(), content: null }
+            : msg,
+        ),
+      );
+    };
+
+    socket.on('message.created', handleCreated);
+    socket.on('message.updated', handleUpdated);
+    socket.on('message.deleted', handleDeleted);
+
+    return () => {
+      socket.off('message.created', handleCreated);
+      socket.off('message.updated', handleUpdated);
+      socket.off('message.deleted', handleDeleted);
+    };
+  }, [socket, threadId]);
 
   useEffect(() => {
     if (currentRoom?.threadId && currentRoom.threadId !== threadId) {
@@ -78,7 +146,7 @@ export default function DMView() {
       content,
       attachments,
     });
-    setMessages((prev) => [...prev, data.message]);
+    setMessages((prev) => mergeMessage(prev, normalizeMessage(data.message)));
   }
 
   return (

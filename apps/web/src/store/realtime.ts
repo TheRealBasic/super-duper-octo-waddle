@@ -25,16 +25,18 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
         },
       }));
     });
-    socket.on('typing', ({ channelId, userId }) => {
+    socket.on('typing', ({ channelId, threadId, userId }) => {
       set((state) => {
-        const key = channelId;
+        const key = channelId ?? threadId;
+        if (!key) return state;
         const current = new Set(state.typing[key] ?? []);
         current.add(userId);
         return { typing: { ...state.typing, [key]: current } };
       });
       setTimeout(() => {
         set((state) => {
-          const key = channelId;
+          const key = channelId ?? threadId;
+          if (!key) return state;
           const current = new Set(state.typing[key] ?? []);
           current.delete(userId);
           return { typing: { ...state.typing, [key]: current } };
