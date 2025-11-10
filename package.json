@@ -1,0 +1,19 @@
+{
+  "name": "super-duper-octo-waddle",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@8.15.0",
+  "scripts": {
+    "dev": "pnpm -r run dev",
+    "build": "pnpm -r run build",
+    "lint": "pnpm -r run lint",
+    "test": "pnpm -r run test",
+    "format": "pnpm -r run format",
+    "migrate": "pnpm --filter server prisma migrate deploy",
+    "seed": "pnpm --filter server prisma db seed"
+  },
+  "devDependencies": {
+    "@types/node": "20.11.19",
+    "typescript": "5.4.3"
+  }
+}
