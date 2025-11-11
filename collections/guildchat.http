@@ -1,0 +1,54 @@
+### Register
+POST http://localhost:3001/auth/register
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "Password123!",
+  "displayName": "Example User"
+}
+
+### Login
+POST http://localhost:3001/auth/login
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "Password123!"
+}
+
+### Create server
+POST http://localhost:3001/servers
+Content-Type: application/json
+Cookie: accessToken={{accessToken}}
+
+{
+  "name": "Test Server"
+}
+
+### List servers
+GET http://localhost:3001/servers
+Cookie: accessToken={{accessToken}}
+
+### Create channel
+POST http://localhost:3001/channels
+Content-Type: application/json
+Cookie: accessToken={{accessToken}}
+
+{
+  "serverId": "{{serverId}}",
+  "name": "general"
+}
+
+### Send message
+POST http://localhost:3001/channels/{{channelId}}/messages
+Content-Type: application/json
+Cookie: accessToken={{accessToken}}
+
+{
+  "content": "Hello world"
+}
+
+### Search messages
+GET http://localhost:3001/search?scope=channel&id={{channelId}}&q=Hello
+Cookie: accessToken={{accessToken}}

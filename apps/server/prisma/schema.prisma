@@ -1,0 +1,205 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  displayName  String
+  avatarUrl    String?
+  createdAt    DateTime  @default(now())
+  serversOwned Server[]  @relation("ServerOwner")
+  memberships  ServerMember[]
+  messages     Message[]
+  dmThreads    DMParticipant[]
+  reactions    Reaction[]
+  presence     Presence?
+}
+
+model Server {
+  id        String         @id @default(uuid())
+  ownerId   String
+  owner     User           @relation("ServerOwner", fields: [ownerId], references: [id])
+  name      String
+  iconUrl   String?
+  createdAt DateTime       @default(now())
+  members   ServerMember[]
+  roles     Role[]
+  channels  Channel[]
+  invites   Invite[]
+  auditLogs AuditLog[]
+}
+
+model ServerMember {
+  id        String    @id @default(uuid())
+  serverId  String
+  userId    String
+  joinedAt  DateTime  @default(now())
+  nickname  String?
+  roles     MemberRole[]
+  isBanned  Boolean   @default(false)
+
+  server Server @relation(fields: [serverId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([serverId, userId])
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  serverId    String
+  name        String
+  color       String?
+  position    Int
+  permissions Int
+  members     MemberRole[]
+  server      Server @relation(fields: [serverId], references: [id])
+}
+
+model MemberRole {
+  id       String @id @default(uuid())
+  memberId String
+  roleId   String
+  member   ServerMember @relation(fields: [memberId], references: [id])
+  role     Role         @relation(fields: [roleId], references: [id])
+
+  @@unique([memberId, roleId])
+}
+
+model Channel {
+  id         String    @id @default(uuid())
+  serverId   String
+  name       String
+  type       ChannelType @default(TEXT)
+  position   Int
+  parentId   String?
+  isPrivate  Boolean   @default(false)
+  slowMode   Int       @default(0)
+  messages   Message[]
+  overrides  ChannelPermissionOverride[]
+  server     Server    @relation(fields: [serverId], references: [id])
+  parent     Channel?  @relation("ChannelChildren", fields: [parentId], references: [id])
+  children   Channel[] @relation("ChannelChildren")
+}
+
+enum ChannelType {
+  TEXT
+  VOICE
+}
+
+model ChannelPermissionOverride {
+  id        String  @id @default(uuid())
+  channelId String
+  roleId    String?
+  memberId  String?
+  allow     Int     @default(0)
+  deny      Int     @default(0)
+
+  channel Channel       @relation(fields: [channelId], references: [id])
+  role    Role?         @relation(fields: [roleId], references: [id])
+  member  ServerMember? @relation(fields: [memberId], references: [id])
+}
+
+model Invite {
+  id        String   @id @default(uuid())
+  serverId  String
+  code      String   @unique
+  uses      Int      @default(0)
+  maxUses   Int?
+  expiresAt DateTime?
+  createdBy String
+  createdAt DateTime @default(now())
+
+  server Server @relation(fields: [serverId], references: [id])
+}
+
+model DMThread {
+  id          String           @id @default(uuid())
+  isGroup     Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+  participants DMParticipant[]
+  messages     Message[]
+}
+
+model DMParticipant {
+  id       String   @id @default(uuid())
+  threadId String
+  userId   String
+  thread   DMThread @relation(fields: [threadId], references: [id])
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@unique([threadId, userId])
+}
+
+model Message {
+  id         String    @id @default(uuid())
+  channelId  String?
+  threadId   String?
+  authorId   String
+  content    String?
+  createdAt  DateTime  @default(now())
+  editedAt   DateTime?
+  deletedAt  DateTime?
+  attachments Attachment[]
+  reactions  Reaction[]
+
+  channel Channel?  @relation(fields: [channelId], references: [id])
+  thread  DMThread? @relation(fields: [threadId], references: [id])
+  author  User      @relation(fields: [authorId], references: [id])
+
+  @@index([channelId, createdAt])
+  @@index([threadId, createdAt])
+  @@index([content], type: Gin)
+}
+
+model Attachment {
+  id        String  @id @default(uuid())
+  messageId String
+  url       String
+  mime      String
+  size      Int
+
+  message Message @relation(fields: [messageId], references: [id])
+}
+
+model Reaction {
+  id        String @id @default(uuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([messageId, userId, emoji])
+}
+
+model Presence {
+  userId    String   @id
+  status    PresenceStatus @default(offline)
+  updatedAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+enum PresenceStatus {
+  online
+  idle
+  offline
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  serverId  String?
+  actorId   String
+  action    String
+  targetId  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+}
