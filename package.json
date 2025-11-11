@@ -4,11 +4,15 @@
   "version": "0.1.0",
   "packageManager": "pnpm@8.15.0",
   "scripts": {
+    "predev": "pnpm install --frozen-lockfile",
     "dev": "pnpm -r run dev",
     "build": "pnpm -r run build",
     "lint": "pnpm -r run lint",
     "test": "pnpm -r run test",
     "format": "pnpm -r run format",
+    "premigrate": "pnpm install --frozen-lockfile",
+    "migrate": "pnpm --filter server run migrate",
+    "preseed": "pnpm install --frozen-lockfile",
     "migrate": "pnpm --filter server run migrate",
     "seed": "pnpm --filter server run seed"
   },
