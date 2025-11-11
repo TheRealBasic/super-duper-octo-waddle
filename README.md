@@ -35,6 +35,113 @@ scripts/           Utility scripts
 - [pnpm](https://pnpm.io/) 8+
 - Docker & Docker Compose
 
+## Windows Quickstart Guide
+
+The project is developed with cross-platform tooling. On Windows we recommend using the latest Windows 11 release with WSL2
+integration so Docker and the Node.js toolchain behave consistently. The walkthrough below uses PowerShell and Ubuntu (WSL2),
+but the same steps work in Windows Terminal.
+
+### 1. Install required software
+
+1. **Enable WSL2 (recommended)**
+   - Open PowerShell as Administrator and run: `wsl --install`.
+   - Reboot when prompted and complete the Ubuntu installation from the Microsoft Store.
+2. **Install Git** – Download the Windows installer from <https://git-scm.com/downloads> and choose the "Git from the command
+   line" option so Git is available in PowerShell.
+3. **Install Node.js + pnpm**
+   - Install Node.js 18 LTS from <https://nodejs.org/en/download> (the installer also enables `corepack`).
+   - After installation, open a new PowerShell window and run `corepack enable` followed by `corepack prepare pnpm@8 --activate`.
+4. **Install Docker Desktop** – Download from <https://www.docker.com/products/docker-desktop/>. During setup, enable the
+   "Use WSL 2 based engine" option. After installation, launch Docker Desktop once so it finishes configuring the backend.
+
+### 2. Clone the repository
+
+```powershell
+git clone https://github.com/your-org/guildchat.git
+cd guildchat
+```
+
+If you prefer to work entirely inside WSL, open Ubuntu (WSL) and run the same commands inside your Linux home directory. Docker
+Desktop automatically shares files between Windows and WSL.
+
+### 3. Bootstrap the project
+
+Run the bootstrap script to create any generated files tracked by the repository:
+
+```powershell
+./bootstrap.sh
+```
+
+> **Tip:** When running inside PowerShell, the first execution may prompt for permission to run scripts. If you see a policy
+> warning, execute `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser` and rerun the script.
+
+### 4. Configure environment variables
+
+Create the `.env` file by copying the template:
+
+```powershell
+cp .env.example .env
+```
+
+All services read values from this file. The defaults work for local development; update any secrets (JWT keys, SMTP settings,
+etc.) before running in production.
+
+### 5. Install dependencies
+
+Install all workspace packages with pnpm:
+
+```powershell
+pnpm install
+```
+
+If PowerShell cannot find `pnpm`, confirm that `C:\Program Files\nodejs` is in your `Path` or re-run `corepack prepare pnpm@8 --activate`.
+
+### 6. Prepare the database
+
+Apply Prisma migrations and seed the development data set:
+
+```powershell
+pnpm -w run migrate
+pnpm -w run seed
+```
+
+Docker Compose automatically brings up PostgreSQL when you start the stack (next step), but the CLI commands ensure the schema
+exists and that sample servers/messages are available.
+
+### 7. Launch the application
+
+Start every service (API, web client, PostgreSQL, Redis, object storage stub) with a single command:
+
+```powershell
+pnpm -w run dev
+```
+
+The first run pulls Docker images, so expect a short delay. Once the log output stabilizes:
+
+- API: <http://localhost:3001>
+- Web client: <http://localhost:5173>
+
+Open a browser to the web client URL and sign in with one of the seeded accounts (e.g., `user1@example.com` / `password123`).
+
+### 8. Running tests on Windows
+
+To execute the Vitest suites locally:
+
+```powershell
+pnpm -w run test
+```
+
+Vitest uses jsdom and runs entirely in Node, so no additional setup is required.
+
+### 9. Stopping services and cleaning up
+
+- Press `Ctrl + C` in the terminal running `pnpm -w run dev` to stop the stack.
+- To tear down containers and volumes manually, run `docker compose down --volumes`.
+- If you need to reset the database, rerun the migrate/seed commands after the stack is up.
+
+With these steps complete, you can iterate on the frontend (Vite hot module reload) and backend (Fastify with hot reload) from
+the same Windows workstation.
+
 ### Bootstrap the repository
 
 ```bash
