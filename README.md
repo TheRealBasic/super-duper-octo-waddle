@@ -106,6 +106,11 @@ development is to start the database and cache in the background:
 docker compose up -d postgres redis
 ```
 
+If Docker Desktop reports an API version error while pulling either image (for example, `unable to get image 'redis:7-alpine' ...
+check if the server supports the requested API version`), update Docker Desktop to the latest release and restart WSL with `wsl
+--shutdown`. Older Docker engine builds shipped with outdated API versions that cannot pull the current images from Docker Hub.
+After updating, rerun `docker compose up -d postgres redis`.
+
 With PostgreSQL and Redis online, apply Prisma migrations and seed the development data set:
 
 ```powershell
