@@ -99,15 +99,22 @@ If PowerShell cannot find `pnpm`, confirm that `C:\Program Files\nodejs` is in y
 
 ### 6. Prepare the database
 
-Apply Prisma migrations and seed the development data set:
+Make sure the backing services defined in `docker-compose.yml` are running before you migrate. The quickest option during local
+development is to start the database and cache in the background:
+
+```powershell
+docker compose up -d postgres redis
+```
+
+With PostgreSQL and Redis online, apply Prisma migrations and seed the development data set:
 
 ```powershell
 pnpm -w run migrate
 pnpm -w run seed
 ```
 
-Docker Compose automatically brings up PostgreSQL when you start the stack (next step), but the CLI commands ensure the schema
-exists and that sample servers/messages are available.
+If you are connecting to an existing database instead of Docker Compose, update `DATABASE_URL` inside `.env` so Prisma can reach
+it. Otherwise, the commands above prepare the schema and load sample servers/messages for you.
 
 ### 7. Launch the application
 
