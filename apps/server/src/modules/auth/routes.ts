@@ -1,11 +1,18 @@
 import type { FastifyInstance } from 'fastify';
-import { RegisterSchema, LoginSchema, NotificationSettingsSchema, OnboardingPreferenceSchema } from '@acme/shared';
+import {
+  RegisterSchema,
+  LoginSchema,
+  NotificationSettingsSchema,
+  OnboardingPreferenceSchema,
+  OAuthRegisterSchema,
+} from '@acme/shared';
 import { hashPassword, verifyPassword } from '../../auth/password.js';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../../auth/jwt.js';
 import { redis } from '../../utils/redis.js';
 import { prisma } from '../../utils/prisma.js';
 import { randomUUID } from 'crypto';
 import { requireAuth } from '../../middleware/auth.js';
+import { verifyAppleIdToken, verifyGoogleIdToken } from '../../auth/oauth.js';
 
 const ACCESS_COOKIE = 'accessToken';
 const REFRESH_COOKIE = 'refreshToken';
@@ -67,6 +74,116 @@ export async function registerAuthRoutes(app: FastifyInstance) {
         domain: app.config.COOKIE_DOMAIN,
       });
     return { user: serializeUser(user) };
+  });
+
+  app.post('/auth/oauth', async (request, reply) => {
+    const data = OAuthRegisterSchema.parse(request.body);
+
+    let profile;
+    try {
+      if (data.provider === 'GOOGLE') {
+        profile = verifyGoogleIdToken(data.idToken, { clientId: app.config.GOOGLE_CLIENT_ID });
+      } else {
+        profile = verifyAppleIdToken(data.idToken, { clientId: app.config.APPLE_CLIENT_ID });
+      }
+    } catch (error) {
+      request.log.warn({ err: error }, 'Invalid OAuth token');
+      return reply.unauthorized('Invalid OAuth token');
+    }
+
+    if (!profile.emailVerified) {
+      return reply.unauthorized('Email must be verified');
+    }
+
+    const existingAccount = await prisma.oAuthAccount.findUnique({
+      where: {
+        provider_providerAccountId: {
+          provider: data.provider,
+          providerAccountId: profile.id,
+        },
+      },
+      include: { user: true },
+    });
+
+    let user = existingAccount?.user ?? null;
+
+    if (!user) {
+      const userByEmail = await prisma.user.findUnique({ where: { email: profile.email } });
+
+      if (userByEmail) {
+        await prisma.oAuthAccount.upsert({
+          where: {
+            provider_providerAccountId: {
+              provider: data.provider,
+              providerAccountId: profile.id,
+            },
+          },
+          update: {},
+          create: {
+            provider: data.provider,
+            providerAccountId: profile.id,
+            userId: userByEmail.id,
+          },
+        });
+        user = userByEmail;
+      } else {
+        const randomPassword = await hashPassword(randomUUID());
+        const fallbackName = profile.name?.trim() || profile.email.split('@')[0] || 'Guild User';
+        const displayName = fallbackName.substring(0, 64);
+        const normalizedName = displayName.length >= 2 ? displayName : 'Guild User';
+
+        user = await prisma.user.create({
+          data: {
+            email: profile.email,
+            passwordHash: randomPassword,
+            displayName: normalizedName,
+            avatarUrl: profile.avatarUrl,
+            onboarded: false,
+            notificationSettings: NotificationSettingsSchema.parse({}),
+            accounts: {
+              create: {
+                provider: data.provider,
+                providerAccountId: profile.id,
+              },
+            },
+          },
+        });
+      }
+    }
+
+    if (profile.avatarUrl && !user.avatarUrl) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: { avatarUrl: profile.avatarUrl },
+      });
+    }
+
+    const completeUser = await prisma.user.findUnique({ where: { id: user.id } });
+    if (!completeUser) {
+      return reply.internalServerError();
+    }
+
+    const sessionId = randomUUID();
+    await redis.set(`session:${sessionId}`, completeUser.id, 'EX', 60 * 60 * 24 * 30);
+    const access = signAccessToken(completeUser.id, sessionId);
+    const refresh = signRefreshToken(completeUser.id, sessionId);
+    reply
+      .setCookie(ACCESS_COOKIE, access, {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: app.config.NODE_ENV === 'production',
+        domain: app.config.COOKIE_DOMAIN,
+      })
+      .setCookie(REFRESH_COOKIE, refresh, {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: app.config.NODE_ENV === 'production',
+        domain: app.config.COOKIE_DOMAIN,
+      });
+
+    return { user: serializeUser(completeUser) };
   });
 
   app.post('/auth/login', async (request, reply) => {

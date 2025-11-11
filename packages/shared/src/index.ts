@@ -26,6 +26,14 @@ export const RegisterSchema = z.object({
   displayName: z.string().min(2).max(64),
 });
 
+export const OAuthProviders = ['GOOGLE', 'APPLE'] as const;
+export type OAuthProvider = (typeof OAuthProviders)[number];
+
+export const OAuthRegisterSchema = z.object({
+  provider: z.enum(OAuthProviders),
+  idToken: z.string().min(1),
+});
+
 export const NotificationSettingsSchema = z.object({
   email: z.boolean().default(true),
   push: z.boolean().default(true),

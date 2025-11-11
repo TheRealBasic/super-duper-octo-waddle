@@ -20,6 +20,7 @@ interface AuthState {
   status: 'idle' | 'loading' | 'authenticated' | 'unauthenticated';
   login: (input: { email: string; password: string }) => Promise<void>;
   register: (input: { email: string; password: string; displayName: string }) => Promise<void>;
+  oauth: (input: { provider: 'GOOGLE' | 'APPLE'; idToken: string }) => Promise<void>;
   logout: () => Promise<void>;
   hydrate: () => Promise<void>;
   setUser: (
@@ -51,15 +52,36 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
   async login(input) {
     set({ status: 'loading' });
-    await axios.post('/auth/login', input);
-    const { data } = await axios.get('/me');
-    set({ user: data.user, status: 'authenticated' });
+    try {
+      await axios.post('/auth/login', input);
+      const { data } = await axios.get('/me');
+      set({ user: data.user, status: 'authenticated' });
+    } catch (error) {
+      set({ status: 'unauthenticated' });
+      throw error;
+    }
   },
   async register(input) {
     set({ status: 'loading' });
-    await axios.post('/auth/register', input);
-    const { data } = await axios.get('/me');
-    set({ user: data.user, status: 'authenticated' });
+    try {
+      await axios.post('/auth/register', input);
+      const { data } = await axios.get('/me');
+      set({ user: data.user, status: 'authenticated' });
+    } catch (error) {
+      set({ status: 'unauthenticated' });
+      throw error;
+    }
+  },
+  async oauth(input) {
+    set({ status: 'loading' });
+    try {
+      await axios.post('/auth/oauth', input);
+      const { data } = await axios.get('/me');
+      set({ user: data.user, status: 'authenticated' });
+    } catch (error) {
+      set({ status: 'unauthenticated' });
+      throw error;
+    }
   },
   async logout() {
     await axios.post('/auth/logout');
