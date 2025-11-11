@@ -13,6 +13,7 @@
     "premigrate": "pnpm install --frozen-lockfile",
     "migrate": "pnpm --filter server run migrate",
     "preseed": "pnpm install --frozen-lockfile",
+    "migrate": "pnpm --filter server run migrate",
     "seed": "pnpm --filter server run seed"
   },
   "devDependencies": {
