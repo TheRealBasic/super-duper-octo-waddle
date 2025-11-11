@@ -1,17 +1,47 @@
 import { FormEvent, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/auth';
+import { requestIdToken } from '../lib/oauth';
+import { AppleIcon, GoogleIcon } from '../components/SocialIcons';
 
 export default function LoginPage() {
   const login = useAuthStore((state) => state.login);
+  const oauth = useAuthStore((state) => state.oauth);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    await login({ email, password });
-    navigate('/');
+    setError(null);
+    try {
+      await login({ email, password });
+      navigate('/');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to login.';
+      setError(message);
+    }
+  }
+
+  async function handleOAuth(provider: 'GOOGLE' | 'APPLE') {
+    setError(null);
+    const label = provider === 'GOOGLE' ? 'Google' : 'Apple';
+    const token = requestIdToken(provider);
+
+    if (!token) {
+      setError(`Unable to start ${label} sign in.`);
+      return;
+    }
+
+    try {
+      await oauth({ provider, idToken: token });
+      navigate('/');
+    } catch (err) {
+      const message =
+        err instanceof Error && err.message ? err.message : `Unable to sign in with ${label}.`;
+      setError(message);
+    }
   }
 
   return (
@@ -42,6 +72,30 @@ export default function LoginPage() {
           Login
         </button>
       </form>
+      {error && <p className="text-sm text-red-400 mt-3">{error}</p>}
+      <div className="flex items-center gap-4 text-white/40 mt-6">
+        <span className="h-px flex-1 bg-white/20" />
+        <span className="text-xs uppercase tracking-wide">Or continue with</span>
+        <span className="h-px flex-1 bg-white/20" />
+      </div>
+      <div className="mt-4 space-y-3">
+        <button
+          type="button"
+          onClick={() => handleOAuth('GOOGLE')}
+          className="w-full flex items-center justify-center gap-2 rounded border border-white/20 py-2 font-semibold hover:border-white/40 transition"
+        >
+          <GoogleIcon className="h-4 w-4" />
+          Continue with Google
+        </button>
+        <button
+          type="button"
+          onClick={() => handleOAuth('APPLE')}
+          className="w-full flex items-center justify-center gap-2 rounded border border-white/20 py-2 font-semibold hover:border-white/40 transition"
+        >
+          <AppleIcon className="h-4 w-4" />
+          Continue with Apple
+        </button>
+      </div>
       <p className="text-sm text-white/60 mt-4">
         Need an account?{' '}
         <Link to="/register" className="text-accent">

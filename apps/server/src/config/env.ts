@@ -20,7 +20,9 @@ const envSchema = z.object({
   MINIO_ACCESS_KEY: z.string().optional(),
   MINIO_SECRET_KEY: z.string().optional(),
   RATE_LIMIT_WINDOW: z.coerce.number().default(60000),
-  RATE_LIMIT_MAX: z.coerce.number().default(120)
+  RATE_LIMIT_MAX: z.coerce.number().default(120),
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  APPLE_CLIENT_ID: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);
