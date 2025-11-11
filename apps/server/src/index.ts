@@ -20,6 +20,10 @@ import { registerModerationRoutes } from './modules/moderation/routes.js';
 import { registerSearchRoutes } from './modules/search/routes.js';
 import { registerUploadRoutes } from './modules/uploads/routes.js';
 import { registerRoleRoutes } from './modules/roles/routes.js';
+import { registerPreferenceRoutes } from './modules/preferences/routes.js';
+import { registerWorkspaceRoutes } from './modules/workspaces/routes.js';
+import { registerAnalyticsRoutes } from './modules/analytics/routes.js';
+import { registerIntegrationRoutes } from './modules/integrations/routes.js';
 import { createRealtimeServer } from './realtime/server.js';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
 
@@ -64,6 +68,10 @@ async function buildServer() {
   await registerSearchRoutes(app);
   await registerUploadRoutes(app);
   await registerRoleRoutes(app);
+  await registerPreferenceRoutes(app);
+  await registerWorkspaceRoutes(app);
+  await registerAnalyticsRoutes(app);
+  await registerIntegrationRoutes(app);
 
   createRealtimeServer(app);
 

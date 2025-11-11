@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { RegisterSchema, LoginSchema } from '@acme/shared';
+import { RegisterSchema, LoginSchema, NotificationSettingsSchema, OnboardingPreferenceSchema } from '@acme/shared';
 import { hashPassword, verifyPassword } from '../../auth/password.js';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../../auth/jwt.js';
 import { redis } from '../../utils/redis.js';
@@ -11,6 +11,26 @@ const ACCESS_COOKIE = 'accessToken';
 const REFRESH_COOKIE = 'refreshToken';
 
 export async function registerAuthRoutes(app: FastifyInstance) {
+  function serializeUser(user: {
+    id: string;
+    email: string;
+    displayName: string;
+    avatarUrl: string | null;
+    onboarded: boolean;
+    preferences: unknown;
+    notificationSettings: unknown;
+  }) {
+    return {
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      avatarUrl: user.avatarUrl ?? undefined,
+      onboarded: user.onboarded,
+      preferences: user.preferences ?? null,
+      notificationSettings: user.notificationSettings ?? null,
+    };
+  }
+
   app.post('/auth/register', async (request, reply) => {
     const data = RegisterSchema.parse(request.body);
     const existing = await prisma.user.findUnique({ where: { email: data.email } });
@@ -23,6 +43,8 @@ export async function registerAuthRoutes(app: FastifyInstance) {
         email: data.email,
         passwordHash,
         displayName: data.displayName,
+        onboarded: false,
+        notificationSettings: NotificationSettingsSchema.parse({}),
       },
     });
     const sessionId = randomUUID();
@@ -44,7 +66,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
         secure: app.config.NODE_ENV === 'production',
         domain: app.config.COOKIE_DOMAIN,
       });
-    return { user: { id: user.id, email: user.email, displayName: user.displayName } };
+    return { user: serializeUser(user) };
   });
 
   app.post('/auth/login', async (request, reply) => {
@@ -76,7 +98,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
         secure: app.config.NODE_ENV === 'production',
         domain: app.config.COOKIE_DOMAIN,
       });
-    return { user: { id: user.id, email: user.email, displayName: user.displayName } };
+    return { user: serializeUser(user) };
   });
 
   app.post('/auth/logout', { preHandler: requireAuth }, async (request, reply) => {
@@ -118,7 +140,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
         secure: app.config.NODE_ENV === 'production',
         domain: app.config.COOKIE_DOMAIN,
       });
-      return { user: { id: user.id, email: user.email, displayName: user.displayName } };
+      return { user: serializeUser(user) };
     } catch {
       return reply.unauthorized();
     }
@@ -129,15 +151,33 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     if (!user) {
       return reply.notFound();
     }
-    return { user: { id: user.id, email: user.email, displayName: user.displayName, avatarUrl: user.avatarUrl } };
+    return { user: serializeUser(user) };
   });
 
   app.patch('/me', { preHandler: requireAuth }, async (request, reply) => {
-    const { displayName, avatarUrl } = request.body as { displayName?: string; avatarUrl?: string };
+    const { displayName, avatarUrl, preferences, notificationSettings } = request.body as {
+      displayName?: string;
+      avatarUrl?: string;
+      preferences?: unknown;
+      notificationSettings?: unknown;
+    };
+
+    if (preferences) {
+      OnboardingPreferenceSchema.parse(preferences);
+    }
+    if (notificationSettings) {
+      NotificationSettingsSchema.parse(notificationSettings);
+    }
     const user = await prisma.user.update({
       where: { id: request.user!.id },
-      data: { displayName, avatarUrl },
+      data: {
+        displayName,
+        avatarUrl,
+        preferences: preferences as object | undefined,
+        notificationSettings: notificationSettings as object | undefined,
+        onboarded: preferences ? true : undefined,
+      },
     });
-    return { user: { id: user.id, email: user.email, displayName: user.displayName, avatarUrl: user.avatarUrl } };
+    return { user: serializeUser(user) };
   });
 }

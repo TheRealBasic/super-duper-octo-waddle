@@ -1,16 +1,40 @@
 import { create } from 'zustand';
 import axios from 'axios';
+import type { NotificationSettingsInput, OnboardingPreferencesInput } from '@acme/shared';
 
 axios.defaults.withCredentials = true;
 axios.defaults.baseURL = '/api';
 
 interface AuthState {
-  user: { id: string; email: string; displayName: string; avatarUrl?: string } | null;
+  user:
+    | {
+        id: string;
+        email: string;
+        displayName: string;
+        avatarUrl?: string;
+        onboarded: boolean;
+        preferences?: OnboardingPreferencesInput | null;
+        notificationSettings?: NotificationSettingsInput | null;
+      }
+    | null;
   status: 'idle' | 'loading' | 'authenticated' | 'unauthenticated';
   login: (input: { email: string; password: string }) => Promise<void>;
   register: (input: { email: string; password: string; displayName: string }) => Promise<void>;
   logout: () => Promise<void>;
   hydrate: () => Promise<void>;
+  setUser: (
+    user:
+      | {
+          id: string;
+          email: string;
+          displayName: string;
+          avatarUrl?: string;
+          onboarded: boolean;
+          preferences?: OnboardingPreferencesInput | null;
+          notificationSettings?: NotificationSettingsInput | null;
+        }
+      | null,
+  ) => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -40,5 +64,8 @@ export const useAuthStore = create<AuthState>((set) => ({
   async logout() {
     await axios.post('/auth/logout');
     set({ user: null, status: 'unauthenticated' });
+  },
+  setUser(user) {
+    set({ user, status: user ? 'authenticated' : 'unauthenticated' });
   },
 }));

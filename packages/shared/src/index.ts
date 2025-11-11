@@ -26,6 +26,43 @@ export const RegisterSchema = z.object({
   displayName: z.string().min(2).max(64),
 });
 
+export const NotificationSettingsSchema = z.object({
+  email: z.boolean().default(true),
+  push: z.boolean().default(true),
+  digest: z.boolean().default(false),
+});
+
+export const OnboardingPreferenceSchema = z.object({
+  role: z.string().min(2).max(100),
+  interests: z.array(z.string().min(1).max(32)).min(1).max(5),
+  summaryFrequency: z.enum(['daily', 'weekly', 'monthly']).default('weekly'),
+  theme: z.enum(['system', 'light', 'dark']).default('system'),
+  notifications: NotificationSettingsSchema,
+});
+
+export const WorkspaceRoles = ['OWNER', 'ADMIN', 'MEMBER'] as const;
+export type WorkspaceRole = (typeof WorkspaceRoles)[number];
+
+export const WorkspaceCreateSchema = z.object({
+  name: z.string().min(2).max(100),
+  description: z.string().max(255).optional(),
+});
+
+export const WorkspaceMemberInviteSchema = z.object({
+  email: z.string().email(),
+  role: z.enum(WorkspaceRoles).default('MEMBER'),
+});
+
+export const IntegrationProviders = ['SLACK', 'GOOGLE_DRIVE'] as const;
+export type IntegrationProvider = (typeof IntegrationProviders)[number];
+
+export const IntegrationCreateSchema = z.object({
+  workspaceId: z.string().uuid(),
+  type: z.enum(IntegrationProviders),
+  accessToken: z.string().min(1).optional(),
+  settings: z.record(z.any()).optional(),
+});
+
 export const LoginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
@@ -182,6 +219,8 @@ export type RTCJoinInput = z.infer<typeof RTCJoinSchema>;
 export type RTCLeaveInput = z.infer<typeof RTCLeaveSchema>;
 export type RTCSignalInput = z.infer<typeof RTCSignalSchema>;
 export type RTCMediaUpdateInput = z.infer<typeof RTCMediaUpdateSchema>;
+export type OnboardingPreferencesInput = z.infer<typeof OnboardingPreferenceSchema>;
+export type NotificationSettingsInput = z.infer<typeof NotificationSettingsSchema>;
 
 export const DMThreadCreateSchema = z.object({
   userIds: z.array(z.string().uuid()).min(1).max(10),
@@ -218,3 +257,7 @@ export const UploadPolicy = {
 };
 
 export const ReactionEmojis = ['👍', '❤️', '😂', '🎉', '👀', '😢'] as const;
+
+export type WorkspaceCreateInput = z.infer<typeof WorkspaceCreateSchema>;
+export type WorkspaceMemberInviteInput = z.infer<typeof WorkspaceMemberInviteSchema>;
+export type IntegrationCreateInput = z.infer<typeof IntegrationCreateSchema>;
