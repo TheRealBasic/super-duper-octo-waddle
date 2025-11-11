@@ -83,8 +83,9 @@ Create the `.env` file by copying the template:
 cp .env.example .env
 ```
 
-All services read values from this file. The defaults work for local development; update any secrets (JWT keys, SMTP settings,
-etc.) before running in production.
+If you skip this step, the workspace `pnpm -w run migrate` and `pnpm -w run seed` commands will automatically copy `.env.example`
+for you before Prisma runs. Either way, make sure to review and update any secrets (JWT keys, SMTP settings, etc.) before
+running in production.
 
 ### 5. Install dependencies
 
