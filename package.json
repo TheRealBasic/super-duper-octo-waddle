@@ -9,8 +9,8 @@
     "lint": "pnpm -r run lint",
     "test": "pnpm -r run test",
     "format": "pnpm -r run format",
-    "migrate": "pnpm --filter server prisma migrate deploy",
-    "seed": "pnpm --filter server prisma db seed"
+    "migrate": "pnpm --filter server run migrate",
+    "seed": "pnpm --filter server run seed"
   },
   "devDependencies": {
     "@types/node": "20.11.19",
