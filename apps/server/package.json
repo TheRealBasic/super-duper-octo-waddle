@@ -4,11 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prisma": "prisma",
+    "predev": "pnpm --filter @acme/shared run build",
     "dev": "tsx watch src/index.ts",
+    "prebuild": "pnpm --filter @acme/shared run build",
     "build": "tsup --config tsup.config.ts",
     "lint": "eslint 'src/**/*.ts'",
     "test": "vitest",
+    "premigrate": "pnpm --filter @acme/shared run build",
     "migrate": "prisma migrate deploy",
+    "preseed": "pnpm --filter @acme/shared run build",
     "seed": "prisma db seed",
     "postinstall": "prisma generate"
   },

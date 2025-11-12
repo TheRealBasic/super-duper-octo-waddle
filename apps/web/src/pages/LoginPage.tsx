@@ -12,6 +12,12 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
+  const devEmail =
+    import.meta.env.VITE_DEV_LOGIN_EMAIL ?? (import.meta.env.DEV ? 'user1@example.com' : undefined);
+  const devPassword =
+    import.meta.env.VITE_DEV_LOGIN_PASSWORD ?? (import.meta.env.DEV ? 'Password123!' : undefined);
+  const showDevBypass = Boolean(devEmail && devPassword);
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
@@ -20,6 +26,21 @@ export default function LoginPage() {
       navigate('/');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unable to login.';
+      setError(message);
+    }
+  }
+
+  async function handleDevBypass() {
+    if (!devEmail || !devPassword) {
+      return;
+    }
+
+    setError(null);
+    try {
+      await login({ email: devEmail, password: devPassword });
+      navigate('/');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to use the dev account.';
       setError(message);
     }
   }
@@ -95,6 +116,15 @@ export default function LoginPage() {
           <AppleIcon className="h-4 w-4" />
           Continue with Apple
         </button>
+        {showDevBypass && (
+          <button
+            type="button"
+            onClick={handleDevBypass}
+            className="w-full flex items-center justify-center gap-2 rounded border border-dashed border-white/30 py-2 font-semibold text-white/80 hover:border-white/60 hover:text-white transition"
+          >
+            Use Dev Account
+          </button>
+        )}
       </div>
       <p className="text-sm text-white/60 mt-4">
         Need an account?{' '}
