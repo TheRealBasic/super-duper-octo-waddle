@@ -46,4 +46,16 @@ if (syncedServerEnv) {
 }
 
 process.exit(0);
+if (!existsSync(envPath)) {
+  copyFileSync(examplePath, envPath);
+  console.log('Created .env file from .env.example for local development.');
+}
+
+if (!existsSync(serverEnvPath)) {
+  copyFileSync(envPath, serverEnvPath);
+  console.log('Copied .env to apps/server/.env so Prisma CLI picks up DATABASE_URL.');
+}
+
+process.exit(0);
+
 
