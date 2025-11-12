@@ -87,6 +87,12 @@ If you skip this step, the workspace `pnpm -w run migrate` and `pnpm -w run seed
 for you before Prisma runs. Either way, make sure to review and update any secrets (JWT keys, SMTP settings, etc.) before
 running in production.
 
+The generated `.env` file assumes you are running the Fastify API directly on your machine while PostgreSQL and Redis run inside
+Docker containers published on their default ports (`5432` for PostgreSQL, `6379` for Redis). If you remap either service when
+starting Docker Compose (for example, using `5433:5432` to avoid a local port conflict), update the corresponding connection
+strings in `.env` so the API can still reach the database and cache. The server container defined in `docker-compose.yml` sets
+its own `DATABASE_URL` and `REDIS_URL`, so these adjustments only apply when you run the API outside of Docker.
+
 ### 5. Install dependencies
 
 Install all workspace packages with pnpm:
@@ -135,6 +141,10 @@ The first run pulls Docker images, so expect a short delay. Once the log output 
 - Web client: <http://localhost:5173>
 
 Open a browser to the web client URL and sign in with one of the seeded accounts (e.g., `user1@example.com` / `password123`).
+
+The Vite dev server proxies `/api` and `/realtime` requests to the URL defined by `VITE_API_URL` (default
+`http://localhost:3001`). Update this environment variable in your `.env` if you expose the API on a different host or port so
+login and registration requests continue to reach the Fastify backend.
 
 ### 8. Running tests on Windows
 

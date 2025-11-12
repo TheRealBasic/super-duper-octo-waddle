@@ -4,14 +4,15 @@ ROOT=$(pwd)
 cat <<'EOF' > '.env.example'
 NODE_ENV=development
 PORT=3001
-DATABASE_URL=postgresql://postgres:postgres@postgres:5432/discord
-REDIS_URL=redis://redis:6379
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/discord
+REDIS_URL=redis://localhost:6379
 JWT_ACCESS_SECRET=change-me-access-secret-change-me
 JWT_REFRESH_SECRET=change-me-refresh-secret-change-me
 ACCESS_TOKEN_TTL=15m
 REFRESH_TOKEN_TTL=30d
 COOKIE_DOMAIN=
 CORS_ORIGIN=http://localhost:5173
+VITE_API_URL=http://localhost:3001
 UPLOAD_DIR=apps/server/uploads
 RATE_LIMIT_WINDOW=60000
 RATE_LIMIT_MAX=120

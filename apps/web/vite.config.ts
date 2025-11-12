@@ -4,6 +4,8 @@ import path from 'path';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
+  const apiTarget =
+    env.VITE_API_URL || process.env.VITE_API_URL || 'http://localhost:3001';
   const apiTarget = env.VITE_API_URL || 'http://localhost:3001';
 
   return {
