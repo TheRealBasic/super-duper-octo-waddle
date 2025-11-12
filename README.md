@@ -140,7 +140,11 @@ The first run pulls Docker images, so expect a short delay. Once the log output 
 - API: <http://localhost:3001>
 - Web client: <http://localhost:5173>
 
-Open a browser to the web client URL and sign in with one of the seeded accounts (e.g., `user1@example.com` / `password123`).
+Open a browser to the web client URL and sign in with one of the seeded accounts (e.g., `user1@example.com` / `Password123!`).
+
+When running the Vite dev server, you can also click **Use Dev Account** on the login page to automatically authenticate with the
+first seeded user. Set `VITE_DEV_LOGIN_EMAIL` and `VITE_DEV_LOGIN_PASSWORD` in `.env` to override the default credentials if you
+seed a different account.
 
 The Vite dev server proxies `/api` and `/realtime` requests to the URL defined by `VITE_API_URL` (default
 `http://localhost:3001`). Update this environment variable in your `.env` if you expose the API on a different host or port so
@@ -182,6 +186,10 @@ cp .env.example .env
 ```
 
 The backend expects matching variables at runtime (Docker compose wires them automatically).
+
+Optional settings for the web client:
+
+- `VITE_DEV_LOGIN_EMAIL` / `VITE_DEV_LOGIN_PASSWORD` – credentials used by the **Use Dev Account** button on the login page.
 
 ### Install dependencies
 

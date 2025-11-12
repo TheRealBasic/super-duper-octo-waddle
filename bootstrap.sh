@@ -201,6 +201,7 @@ cat <<'EOF' > 'apps/server/package.json'
   "private": true,
   "type": "module",
   "scripts": {
+    "prisma": "prisma",
     "dev": "tsx watch src/index.ts",
     "build": "tsup src/index.ts --format esm --dts --splitting",
     "lint": "eslint 'src/**/*.ts'",
