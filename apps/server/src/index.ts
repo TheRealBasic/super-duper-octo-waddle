@@ -1,11 +1,11 @@
-import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import fastifySensible from '@fastify/sensible';
+import Fastify from 'fastify';
+import fs from 'fs/promises';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
 import { prisma } from './utils/prisma.js';
@@ -27,12 +27,13 @@ import { registerIntegrationRoutes } from './modules/integrations/routes.js';
 import { createRealtimeServer } from './realtime/server.js';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
 async function buildServer() {
   const app = Fastify({
     logger,
   }).withTypeProvider<ZodTypeProvider>();
+
+  const uploadDir = path.resolve(process.cwd(), env.UPLOAD_DIR);
+  await fs.mkdir(uploadDir, { recursive: true });
 
   app.decorate('config', env);
   app.decorate('prisma', prisma);
@@ -53,7 +54,7 @@ async function buildServer() {
     },
   });
   await app.register(fastifyStatic, {
-    root: path.join(__dirname, '..', 'uploads'),
+    root: uploadDir,
     prefix: '/uploads/',
   });
 
