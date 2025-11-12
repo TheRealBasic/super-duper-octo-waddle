@@ -60,6 +60,7 @@ model ServerMember {
   nickname  String?
   roles     MemberRole[]
   isBanned  Boolean   @default(false)
+  overrides ChannelPermissionOverride[]
 
   server Server @relation(fields: [serverId], references: [id])
   user   User   @relation(fields: [userId], references: [id])
@@ -75,6 +76,7 @@ model Role {
   position    Int
   permissions Int
   members     MemberRole[]
+  overrides   ChannelPermissionOverride[]
   server      Server @relation(fields: [serverId], references: [id])
 }
 
@@ -171,7 +173,6 @@ model Message {
 
   @@index([channelId, createdAt])
   @@index([threadId, createdAt])
-  @@index([content], type: Gin)
 }
 
 model Attachment {
@@ -218,6 +219,8 @@ model AuditLog {
   targetId  String?
   metadata  Json?
   createdAt DateTime @default(now())
+  server    Server?  @relation(fields: [serverId], references: [id])
+  actor     User     @relation(fields: [actorId], references: [id])
 }
 
 model Workspace {
