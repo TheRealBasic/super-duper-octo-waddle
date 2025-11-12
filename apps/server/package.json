@@ -12,10 +12,10 @@
     "lint": "eslint 'src/**/*.ts'",
     "test": "vitest",
     "premigrate": "pnpm --filter @acme/shared run build",
-    "migrate": "prisma migrate deploy",
+    "migrate": "pnpm run prisma migrate deploy",
     "preseed": "pnpm --filter @acme/shared run build",
-    "seed": "prisma db seed",
-    "postinstall": "prisma generate"
+    "seed": "pnpm run prisma db seed",
+    "postinstall": "pnpm run prisma generate"
   },
   "dependencies": {
     "@acme/shared": "workspace:*",
@@ -56,5 +56,8 @@
     "tsx": "4.7.0",
     "typescript": "5.4.3",
     "vitest": "1.4.0"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   }
 }

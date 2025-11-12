@@ -11,9 +11,9 @@
     "test": "pnpm -r run test",
     "format": "pnpm -r run format",
     "premigrate": "pnpm install --frozen-lockfile",
-    "migrate": "node scripts/ensure-env.mjs && pnpm --filter server run migrate",
+    "migrate": "node scripts/ensure-env.mjs && pnpm --dir apps/server run migrate",
     "preseed": "pnpm install --frozen-lockfile",
-    "seed": "node scripts/ensure-env.mjs && pnpm --filter server run seed"
+    "seed": "node scripts/ensure-env.mjs && pnpm --dir apps/server run seed"
   },
   "devDependencies": {
     "@types/node": "20.11.19",
