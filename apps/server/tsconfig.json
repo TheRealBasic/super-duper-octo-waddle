@@ -2,7 +2,20 @@
   "extends": "../../packages/config/tsconfig/base.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": "src",
+    "paths": {
+      "@acme/shared": [
+        "../../packages/shared/src"
+      ],
+      "@acme/shared/*": [
+        "../../packages/shared/src/*"
+      ]
+    },
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ]
 }

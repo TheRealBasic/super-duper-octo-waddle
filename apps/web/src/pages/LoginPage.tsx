@@ -12,10 +12,20 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
+  const envDevEmail = import.meta.env.VITE_DEV_LOGIN_EMAIL;
+  const envDevPassword = import.meta.env.VITE_DEV_LOGIN_PASSWORD;
   const devEmail =
-    import.meta.env.VITE_DEV_LOGIN_EMAIL ?? (import.meta.env.DEV ? 'user1@example.com' : undefined);
+    envDevEmail && envDevEmail.trim().length > 0
+      ? envDevEmail.trim()
+      : import.meta.env.DEV
+        ? 'user1@example.com'
+        : undefined;
   const devPassword =
-    import.meta.env.VITE_DEV_LOGIN_PASSWORD ?? (import.meta.env.DEV ? 'Password123!' : undefined);
+    envDevPassword && envDevPassword.trim().length > 0
+      ? envDevPassword.trim()
+      : import.meta.env.DEV
+        ? 'Password123!'
+        : undefined;
   const showDevBypass = Boolean(devEmail && devPassword);
 
   async function handleSubmit(event: FormEvent) {

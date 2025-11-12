@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: discord
     ports:
-      - '5432:5432'
+      - '5433:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -31,7 +31,7 @@ services:
       dockerfile: Dockerfile.server
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/discord
+      DATABASE_URL: postgresql://postgres:postgres@host.docker.internal:5433/discord
       REDIS_URL: redis://redis:6379
     volumes:
       - ./apps/server/uploads:/app/apps/server/uploads
@@ -42,6 +42,8 @@ services:
         condition: service_healthy
     ports:
       - '3001:3001'
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
 
   web:
     build:

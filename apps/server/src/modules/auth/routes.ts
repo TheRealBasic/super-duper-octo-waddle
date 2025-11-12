@@ -5,6 +5,7 @@ import {
   NotificationSettingsSchema,
   OnboardingPreferenceSchema,
   OAuthRegisterSchema,
+  createDefaultNotificationSettings,
 } from '@acme/shared';
 import { hashPassword, verifyPassword } from '../../auth/password.js';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../../auth/jwt.js';
@@ -18,6 +19,19 @@ const ACCESS_COOKIE = 'accessToken';
 const REFRESH_COOKIE = 'refreshToken';
 
 export async function registerAuthRoutes(app: FastifyInstance) {
+  function cookieOptions() {
+    const base = {
+      httpOnly: true,
+      sameSite: 'lax' as const,
+      path: '/',
+      secure: app.config.NODE_ENV === 'production',
+    };
+
+    return app.config.COOKIE_DOMAIN
+      ? { ...base, domain: app.config.COOKIE_DOMAIN }
+      : base;
+  }
+
   function serializeUser(user: {
     id: string;
     email: string;
@@ -51,7 +65,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
         passwordHash,
         displayName: data.displayName,
         onboarded: false,
-        notificationSettings: NotificationSettingsSchema.parse({}),
+        notificationSettings: createDefaultNotificationSettings(),
       },
     });
     const sessionId = randomUUID();
@@ -59,20 +73,8 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     const access = signAccessToken(user.id, sessionId);
     const refresh = signRefreshToken(user.id, sessionId);
     reply
-      .setCookie(ACCESS_COOKIE, access, {
-        httpOnly: true,
-        sameSite: 'lax',
-        path: '/',
-        secure: app.config.NODE_ENV === 'production',
-        domain: app.config.COOKIE_DOMAIN,
-      })
-      .setCookie(REFRESH_COOKIE, refresh, {
-        httpOnly: true,
-        sameSite: 'lax',
-        path: '/',
-        secure: app.config.NODE_ENV === 'production',
-        domain: app.config.COOKIE_DOMAIN,
-      });
+      .setCookie(ACCESS_COOKIE, access, cookieOptions())
+      .setCookie(REFRESH_COOKIE, refresh, cookieOptions());
     return { user: serializeUser(user) };
   });
 
@@ -139,7 +141,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
             displayName: normalizedName,
             avatarUrl: profile.avatarUrl,
             onboarded: false,
-            notificationSettings: NotificationSettingsSchema.parse({}),
+            notificationSettings: createDefaultNotificationSettings(),
             accounts: {
               create: {
                 provider: data.provider,
@@ -168,20 +170,8 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     const access = signAccessToken(completeUser.id, sessionId);
     const refresh = signRefreshToken(completeUser.id, sessionId);
     reply
-      .setCookie(ACCESS_COOKIE, access, {
-        httpOnly: true,
-        sameSite: 'lax',
-        path: '/',
-        secure: app.config.NODE_ENV === 'production',
-        domain: app.config.COOKIE_DOMAIN,
-      })
-      .setCookie(REFRESH_COOKIE, refresh, {
-        httpOnly: true,
-        sameSite: 'lax',
-        path: '/',
-        secure: app.config.NODE_ENV === 'production',
-        domain: app.config.COOKIE_DOMAIN,
-      });
+      .setCookie(ACCESS_COOKIE, access, cookieOptions())
+      .setCookie(REFRESH_COOKIE, refresh, cookieOptions());
 
     return { user: serializeUser(completeUser) };
   });
@@ -201,20 +191,8 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     const access = signAccessToken(user.id, sessionId);
     const refresh = signRefreshToken(user.id, sessionId);
     reply
-      .setCookie(ACCESS_COOKIE, access, {
-        httpOnly: true,
-        sameSite: 'lax',
-        path: '/',
-        secure: app.config.NODE_ENV === 'production',
-        domain: app.config.COOKIE_DOMAIN,
-      })
-      .setCookie(REFRESH_COOKIE, refresh, {
-        httpOnly: true,
-        sameSite: 'lax',
-        path: '/',
-        secure: app.config.NODE_ENV === 'production',
-        domain: app.config.COOKIE_DOMAIN,
-      });
+      .setCookie(ACCESS_COOKIE, access, cookieOptions())
+      .setCookie(REFRESH_COOKIE, refresh, cookieOptions());
     return { user: serializeUser(user) };
   });
 
@@ -228,9 +206,10 @@ export async function registerAuthRoutes(app: FastifyInstance) {
         // ignore
       }
     }
-    reply
-      .clearCookie(ACCESS_COOKIE, { path: '/' })
-      .clearCookie(REFRESH_COOKIE, { path: '/' });
+    const clearOptions = app.config.COOKIE_DOMAIN
+      ? { path: '/', domain: app.config.COOKIE_DOMAIN }
+      : { path: '/' };
+    reply.clearCookie(ACCESS_COOKIE, clearOptions).clearCookie(REFRESH_COOKIE, clearOptions);
     return { success: true };
   });
 
@@ -250,13 +229,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
         return reply.unauthorized();
       }
       const access = signAccessToken(user.id, payload.sessionId);
-      reply.setCookie(ACCESS_COOKIE, access, {
-        httpOnly: true,
-        sameSite: 'lax',
-        path: '/',
-        secure: app.config.NODE_ENV === 'production',
-        domain: app.config.COOKIE_DOMAIN,
-      });
+      reply.setCookie(ACCESS_COOKIE, access, cookieOptions());
       return { user: serializeUser(user) };
     } catch {
       return reply.unauthorized();
