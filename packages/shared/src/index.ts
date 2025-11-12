@@ -40,6 +40,19 @@ export const NotificationSettingsSchema = z.object({
   digest: z.boolean().default(false),
 });
 
+const notificationDefaults = {
+  email: true,
+  push: true,
+  digest: false,
+} as const;
+
+export const DEFAULT_NOTIFICATION_SETTINGS =
+  NotificationSettingsSchema.parse(notificationDefaults);
+
+export function createDefaultNotificationSettings() {
+  return { ...DEFAULT_NOTIFICATION_SETTINGS };
+}
+
 export const OnboardingPreferenceSchema = z.object({
   role: z.string().min(2).max(100),
   interests: z.array(z.string().min(1).max(32)).min(1).max(5),

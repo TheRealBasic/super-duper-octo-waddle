@@ -1,7 +1,24 @@
 #!/usr/bin/env node
-import { existsSync, copyFileSync } from 'node:fs';
+import { existsSync, copyFileSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+function copyIfDifferent(source, target) {
+  if (!existsSync(source)) {
+    return false;
+  }
+  if (!existsSync(target)) {
+    copyFileSync(source, target);
+    return true;
+  }
+  const sourceContent = readFileSync(source, 'utf8');
+  const targetContent = readFileSync(target, 'utf8');
+  if (sourceContent !== targetContent) {
+    copyFileSync(source, target);
+    return true;
+  }
+  return false;
+}
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(currentDir, '..');
@@ -14,6 +31,21 @@ if (!existsSync(examplePath)) {
   process.exit(0);
 }
 
+let createdRootEnv = false;
+if (!existsSync(envPath)) {
+  copyFileSync(examplePath, envPath);
+  createdRootEnv = true;
+  console.log('Created .env file from .env.example for local development.');
+}
+
+const syncedServerEnv = copyIfDifferent(envPath, serverEnvPath);
+if (syncedServerEnv) {
+  console.log('Copied .env to apps/server/.env so Prisma CLI picks up DATABASE_URL.');
+} else if (!createdRootEnv) {
+  console.log('Environment files already up to date.');
+}
+
+process.exit(0);
 if (!existsSync(envPath)) {
   copyFileSync(examplePath, envPath);
   console.log('Created .env file from .env.example for local development.');

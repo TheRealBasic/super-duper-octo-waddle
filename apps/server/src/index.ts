@@ -41,11 +41,12 @@ async function buildServer() {
 
   await app.register(fastifySensible);
   await app.register(cookie, {
-    cookieName: 'accessToken',
     secret: env.JWT_ACCESS_SECRET,
+    parseOptions: { sameSite: 'lax' },
   });
+  const allowedOrigins = env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean);
   await app.register(cors, {
-    origin: env.CORS_ORIGIN.split(',').map((origin) => origin.trim()),
+    origin: allowedOrigins.length > 0 ? allowedOrigins : true,
     credentials: true,
   });
   await app.register(multipart, {

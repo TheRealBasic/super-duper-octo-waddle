@@ -1,6 +1,11 @@
 import { PrismaClient } from '@prisma/client';
 import { hashPassword } from '../src/auth/password.js';
-import { DEFAULT_MEMBER_PERMISSIONS, OWNER_PERMISSIONS, ReactionEmojis } from '@acme/shared';
+import {
+  DEFAULT_MEMBER_PERMISSIONS,
+  OWNER_PERMISSIONS,
+  ReactionEmojis,
+  createDefaultNotificationSettings,
+} from '@acme/shared';
 import { randomUUID } from 'crypto';
 
 const prisma = new PrismaClient();
@@ -27,6 +32,7 @@ async function main() {
           email: `user${index + 1}@example.com`,
           passwordHash: await hashPassword('Password123!'),
           displayName: `User ${index + 1}`,
+          notificationSettings: createDefaultNotificationSettings(),
         },
       }),
     ),

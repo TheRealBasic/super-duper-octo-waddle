@@ -1,5 +1,5 @@
 import 'fastify';
-import type { Env } from '../config/env';
+import type { Env } from '../config/env.js';
 import type { PrismaClient } from '@prisma/client';
 import type Redis from 'ioredis';
 
