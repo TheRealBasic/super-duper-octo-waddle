@@ -169,16 +169,22 @@ export const ReactionSchema = z.object({
   emoji: z.string().min(1).max(64),
 });
 
-const rtcRoomTarget = z
-  .object({
-    channelId: z.string().uuid().optional(),
-    threadId: z.string().uuid().optional(),
-  })
-  .refine((data) => data.channelId || data.threadId, {
-    message: 'channelId or threadId is required',
-  });
+const rtcRoomTargetBase = z.object({
+  channelId: z.string().uuid().optional(),
+  threadId: z.string().uuid().optional(),
+});
 
-export const RTCJoinSchema = rtcRoomTarget.extend({
+const withRtcRoomTarget = <T extends z.ZodRawShape>(extension: T) =>
+  rtcRoomTargetBase.extend(extension).refine(
+    (data) => data.channelId || data.threadId,
+    {
+      message: 'channelId or threadId is required',
+    },
+  );
+
+const rtcRoomTarget = withRtcRoomTarget({});
+
+export const RTCJoinSchema = withRtcRoomTarget({
   enableVideo: z.boolean().optional(),
 });
 
@@ -203,12 +209,12 @@ const rtcIceCandidate = z.object({
   }),
 });
 
-export const RTCSignalSchema = rtcRoomTarget.extend({
+export const RTCSignalSchema = withRtcRoomTarget({
   targetUserId: z.string().uuid(),
   payload: z.union([rtcOffer, rtcAnswer, rtcIceCandidate]),
 });
 
-export const RTCMediaUpdateSchema = rtcRoomTarget.extend({
+export const RTCMediaUpdateSchema = withRtcRoomTarget({
   videoEnabled: z.boolean(),
 });
 
