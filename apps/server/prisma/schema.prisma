@@ -23,6 +23,7 @@ model User {
   dmThreads    DMParticipant[]
   reactions    Reaction[]
   presence     Presence?
+  auditLogs    AuditLog[]
   workspacesOwned Workspace[] @relation("WorkspaceOwner")
   workspaceMemberships WorkspaceMember[]
   accounts     OAuthAccount[]
