@@ -223,7 +223,7 @@ cat <<'EOF' > 'apps/server/package.json'
     "cookie": "0.6.0",
     "dotenv": "16.4.5",
     "fastify": "4.26.2",
-    "fastify-rate-limit": "7.9.0",
+    "@fastify/rate-limit": "6.0.0",
     "fastify-type-provider-zod": "4.0.1",
     "ioredis": "5.3.2",
     "jsonwebtoken": "9.0.2",
@@ -1101,7 +1101,7 @@ EOF
 mkdir -p 'apps/server/src/middleware'
 cat <<'EOF' > 'apps/server/src/middleware/rate-limit.ts'
 import type { FastifyInstance } from 'fastify';
-import fastifyRateLimit from 'fastify-rate-limit';
+import fastifyRateLimit from '@fastify/rate-limit';
 import { env } from '../config/env.js';
 
 export async function registerRateLimit(app: FastifyInstance) {
