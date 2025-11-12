@@ -4,4 +4,5 @@ dist
 build
 coverage
 .env
+apps/server/.env
 apps/server/uploads
