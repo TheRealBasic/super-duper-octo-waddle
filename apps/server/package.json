@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "prisma": "prisma",
+    "prisma": "node ../../scripts/ensure-env.mjs && prisma",
     "predev": "pnpm --filter @acme/shared run build",
     "dev": "tsx watch src/index.ts",
     "prebuild": "pnpm --filter @acme/shared run build",
